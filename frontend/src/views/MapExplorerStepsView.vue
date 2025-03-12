@@ -263,8 +263,291 @@ function getPixelValue(x, y) {
     return imageData.data[index]; // Take Red channel (Greyscale Image)
 }
 
+/*
+
+// Function to fetch an image given a URL
+function loadImage(url) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = "Anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = url;
+    });
+}
+
+// Function to create a larger tile from smaller ones
+async function generateLargeTile(coords) {
+    const x = coords.x;
+    const y = coords.y;
+    const zoom = coords.z;
+    const outputSize = BASE_SIZE; // Output size is always BASE_SIZE, ex 128x128
+    const tileSize = BASE_SIZE / (2 ** (BASE_ZOOM - zoom)); // Individual tile size at current zoom, ex 32x32
+    const fetchTileSize = tileSize * 2; // Twice the tile size for overlapping, ex 64x64
+    const gridSize = outputSize / tileSize; // We want a gridSize x gridSize grid of final tileSize x tileSize cells, ex 4x4 of 32x32
+    const fetchGridSize = gridSize + 1; // Fetch one more row and column grid for overlap handling
+
+    const offsetX = x * tileSize - (fetchTileSize / 2);
+    const offsetY = y * tileSize - (fetchTileSize / 2);
+    const fetchZoom = zoom + 1; // Zoom level at which we fetch images
+
+    // Create an offscreen canvas
+    const offscreenCanvas = document.createElement("canvas");
+    offscreenCanvas.width = outputSize;
+    offscreenCanvas.height = outputSize;
+    const ctx = offscreenCanvas.getContext("2d", { willReadFrequently: true });
+
+    // Load tiles
+    const tilePromises = [];
+    for (let i = 0; i < fetchGridSize; i++) {
+        for (let j = 0; j < fetchGridSize; j++) {
+            // get the x and y coordinate of the tile that would be of size tileSize (and get a larger fetchTileSize to account for overlap)
+            const tileX = Math.floor(offsetX / tileSize) + i;
+            const tileY = Math.floor(offsetY / tileSize) + j;
+            const fetchCoords = { x: tileX, y: tileY, z: fetchZoom };
+            const url = getTileUrl(fetchCoords);
+            console.log("loadImage: ", url, " at ", fetchCoords);
+            tilePromises.push(loadImage(url));
+        }
+    }
+
+    const images = await Promise.all(tilePromises);
+
+    // Draw tiles onto the canvas in a 5x5 grid
+    let imgIndex = 0;
+    for (let i = 0; i < fetchGridSize; i++) {
+        for (let j = 0; j < fetchGridSize; j++) {
+            const img = images[imgIndex++];
+            ctx.drawImage(img, j * fetchTileSize, i * fetchTileSize, fetchTileSize, fetchTileSize);
+        }
+    }
+
+    // Now process the 4x4 overlapping grid using 1/4 of each of the 4 tiles
+    for (let i = 0; i < gridSize; i++) {
+        for (let j = 0; j < gridSize; j++) {
+            const sx = (j + 1) * fetchTileSize - fetchTileSize / 2;
+            const sy = (i + 1) * fetchTileSize - fetchTileSize / 2;
+            const sw = fetchTileSize / 2;
+            const sh = fetchTileSize / 2;
+
+            const dx = j * tileSize;
+            const dy = i * tileSize;
+            const dw = tileSize;
+            const dh = tileSize;
+
+            // Extract the four quadrants from the neighboring tiles
+            const topLeft = ctx.getImageData(sx - sw, sy - sh, sw, sh);
+            const topRight = ctx.getImageData(sx, sy - sh, sw, sh);
+            const bottomLeft = ctx.getImageData(sx - sw, sy, sw, sh);
+            const bottomRight = ctx.getImageData(sx, sy, sw, sh);
+
+            // Clear the destination area
+            ctx.clearRect(dx, dy, dw, dh);
+
+            // Draw the quadrants onto the final tile
+            ctx.putImageData(topLeft, dx, dy);
+            ctx.putImageData(topRight, dx + dw / 2, dy);
+            ctx.putImageData(bottomLeft, dx, dy + dh / 2);
+            ctx.putImageData(bottomRight, dx + dw / 2, dy + dh / 2);
+        }
+    }
+
+    return offscreenCanvas;
+}
+*/
+
+function getAlphaMask(bitmask, boundarySize) {
+  // TODO: preload
+    // Create a small offscreen canvas for the alpha mask
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = boundarySize;
+    maskCanvas.height = boundarySize;
+    const maskCtx = maskCanvas.getContext('2d');
+
+    // We'll build raw RGBA data. By default, RGBA = (0, 0, 0, 0).
+    const data = new Uint8ClampedArray(boundarySize * boundarySize * 4);
+
+    // For each pixel in boundarySize×boundarySize, decide if it’s
+    // in top-left (bit 1), top-right (bit 2), bottom-left (bit 4),
+    // or bottom-right (bit 8). We do simple nearest-neighbor logic:
+    for (let row = 0; row < boundarySize; row++) {
+        for (let col = 0; col < boundarySize; col++) {
+            // Figure out which of the 4 corners this pixel belongs to:
+            let cornerBit = 0;
+            const half = boundarySize / 2;
+            const top = (row < half);
+            const left = (col < half);
+
+            if (top && left) {
+                cornerBit = 1;  // top-left
+            } else if (top && !left) {
+                cornerBit = 2;  // top-right
+            } else if (!top && left) {
+                cornerBit = 4;  // bottom-left
+            } else {
+                cornerBit = 8;  // bottom-right
+            }
+
+            // If this corner is in bitmask, alpha=255; else 0
+            const alpha = (bitmask & cornerBit) ? 255 : 0;
+            const idx = (row * boundarySize + col) * 4;
+            data[idx]     = 0;   // R
+            data[idx + 1] = 0;   // G
+            data[idx + 2] = 0;   // B
+            data[idx + 3] = alpha;
+        }
+    }
+
+    // Put the pixel data back into the mask canvas
+    const maskData = new ImageData(data, boundarySize, boundarySize);
+    maskCtx.putImageData(maskData, 0, 0);
+
+    //console.log("draw alpha mask", maskCanvas.toDataURL("image/png")); // TODO: make sure all data URLs are cleaned up
+
+    return maskCanvas;
+}
+
+async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
+    // Decide how many squares in each dimension. 
+    // For example, if BASE_ZOOM=7 and z=3, scale=2^(7-3)=16 => 16 squares horizontally.
+
+    //console.log("createZoomedTile", x, y, z, BASE_SIZE, BASE_ZOOM);
+    const scale = BASE_SIZE * 2 ** (z - BASE_ZOOM);  // size of each tile's edge in pixels
+    const gridSize = 2 ** (BASE_ZOOM - z) + 1;  // number of real tiles in each edge e.g., 17
+    const boundarySize = 2 ** (BASE_ZOOM - z); // Each boundary square is 16×16 (adjust if needed)
+    //console.log("scale", scale, "gridSize", gridSize, "boundarySize", boundarySize);
+
+    // The final offscreen canvas:
+
+    const offCanvas = document.createElement('canvas');
+    offCanvas.width = boundarySize * scale;
+    offCanvas.height = boundarySize * scale;
+    //console.log("offCanvas.width, offCanvas.height", offCanvas.width, offCanvas.height);
+    const offCtx = offCanvas.getContext('2d');
+
+    // Clear it first
+    offCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
+
+    // "Corner" sampling:
+    // top-left corner in world coordinates:
+    const startWorldX = x * boundarySize; 
+    const startWorldY = y * boundarySize; 
+    // So we’ll read the 17×17 set of actual tile centers from
+    // (startWorldX, startWorldY) to (startWorldX+gridSize, startWorldY+gridSize).
+
+    //console.log("startWorldX, startWorldY", startWorldX, startWorldY);
+
+    // For each boundary square [i,j], we need the 4 corners' element IDs:
+    // corners: (i, j), (i+1, j), (i, j+1), (i+1, j+1).
+    for (let j = 0; j < gridSize; j++) {
+        for (let i = 0; i < gridSize; i++) {
+            // The top-left corner in that 17×17 set:
+            const topLeftID     = getPixelValue(startWorldX + i,   startWorldY + j);
+            const topRightID    = getPixelValue(startWorldX + i+1, startWorldY + j);
+            const bottomLeftID  = getPixelValue(startWorldX + i,   startWorldY + j+1);
+            const bottomRightID = getPixelValue(startWorldX + i+1, startWorldY + j+1);
+
+            // Now find the unique IDs among these four:
+            // For each unique ID, figure out which bits apply 
+            // (top-left=1, top-right=2, bottom-left=4, bottom-right=8)
+            const cornerMap = new Map(); // Map elementID => bitmask
+            function setCorner(id, bit) {
+                if (!cornerMap.has(id)) {
+                    cornerMap.set(id, 0);
+                }
+                cornerMap.set(id, cornerMap.get(id) | bit);
+            }
+            setCorner(topLeftID,     1);
+            setCorner(topRightID,    2);
+            setCorner(bottomLeftID,  4);
+            setCorner(bottomRightID, 8);
+            //console.log("i, j", i, j)
+
+            // For each unique ID, get the alpha mask and then draw the tile:
+            for (const [elementID, bitmask] of cornerMap.entries()) {
+                // 1) Build or reuse the alpha mask:
+                const alphaMaskCanvas = getAlphaMask(bitmask, scale);
+                const alphaMaskCtx = alphaMaskCanvas.getContext('2d');
+
+                // 2) Load the tile image for the offset coords & that elementID
+                //    The "offsetCoords" might just be your same (x, y, z), or 
+                //    you might pass something different if you want sub-tiling, etc.
+                const offsetCoords = { x: (startWorldX + i), y: (startWorldY + j), z };
+                const tileUrl = getOffsetTileUrl(offsetCoords, elementID);
+                //console.log("loadImage url at coord", tileUrl, "for element", elementID, offsetCoords, cornerMap);
+
+                // We'll load it via a temporary <img>:
+                let img = await loadImage(tileUrl);
+
+                // 3) Combine the alpha mask and the tile image 
+                //    by drawing the tile onto alphaMaskCanvas using "source-over",
+                //    then we’ll draw alphaMaskCanvas onto offCanvas.
+                
+                
+                const tileCanvas = document.createElement('canvas');
+                tileCanvas.width = boundarySize;
+                tileCanvas.height = boundarySize;
+                const tileCtx = tileCanvas.getContext('2d'); // TODO: remove if not used
+                // Clear the alphaMask first:
+
+                //console.log(alphaMaskCanvas.toDataURL("image/png"));
+                //alphaMaskCtx.clearRect(0, 0, scale, scale);
+                //console.log(alphaMaskCanvas.toDataURL("image/png"));
+
+                // Draw the tile:
+                
+                //tileCtx.drawImage(alphaMaskCanvas, 0, 0, scale, scale);
+                //console.log("draw alpha", alphaMaskCanvas.toDataURL("image/png"));
+                alphaMaskCtx.globalCompositeOperation = 'source-in';
+                alphaMaskCtx.drawImage(img, 0, 0, scale, scale);
+                alphaMaskCtx.globalCompositeOperation = 'source-over';
+                //console.log("draw tile", alphaMaskCanvas.toDataURL("image/png"));
+
+                // alphaMaskCanvas is now the tile image, 
+                // but we actually want the mask to cut out corners.
+                // The easiest way: set alphaMaskCtx.globalCompositeOperation = 'destination-in'
+                // and redraw the alpha shape on top.
+
+                //console.log(alphaMaskCanvas.toDataURL("image/png"));
+
+                // Redraw the same alpha mask we already put in alphaMaskCanvas,
+                // or just put the mask again:
+                // (But we already have the alpha in the mask’s pixels, 
+                // so we can skip re-drawing if we built the mask that way from scratch.)
+                // If you need to re-draw, you could do:
+                // alphaMaskCtx.drawImage(originalMask, 0, 0); 
+                // but since getAlphaMask(...) directly returned alpha in the entire region, 
+                // we could also first draw the tile onto a blank canvas, 
+                // then compose with alpha. Approaches vary.
+
+                // Finally, draw alphaMaskCanvas into the final offscreen at the correct offset:
+                const drawX = i * scale;
+                const drawY = j * scale;
+                offCtx.drawImage(alphaMaskCanvas, drawX, drawY);
+                //console.log("one draw", offCanvas.toDataURL("image/png"));
+                //console.log("drawX, drawY", drawX, drawY, scale, scale);
+            }
+            //console.log("cell draw", offCanvas.toDataURL("image/png"));
+        }
+    }
+
+    // Return the completed canvas
+    return offCanvas;
+}
+
+// Helper: load an <img> from a URL and await it
+function loadImage(url) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = url;
+    });
+}
+
+
 const BASE_ZOOM = 7; // Base zoom level for the map
-const BASE_SIZE = 64; // Base tile size for the map
+const BASE_SIZE = 128; // Base tile size for the map
 const TILES_PER_CELL = 8; // Number of tiles per cell
 const MAX_SIZE_PER_CELL = 128; // Maximum size per cell
 const MAX_LOSSLESS_ZOOM = Math.floor(Math.log(MAX_SIZE_PER_CELL / BASE_SIZE) / Math.log(2)) + BASE_ZOOM; // Maximum zoom level for lossless tiles
@@ -294,56 +577,89 @@ function getTileUrl(coords) {
     return `/hex_colors_32/${colorHex}.png`;
 }
 
+function getOffsetTileUrl(coords, elementId) {
+    // Adjust x/y to match tile indexing
+    const x = coords.x;
+    const y = coords.y;
+    const zoom = coords.z;
+    //const absolute_x = zoom > BASE_ZOOM ? Math.floor(x/(2**(zoom-BASE_ZOOM))) : Math.floor(x/(2**(0)));
+    //const absolute_y = zoom > BASE_ZOOM ? Math.floor(y/(2**(zoom-BASE_ZOOM))) : Math.floor(y/(2**(0)));
+    // const size = zoom > BASE_ZOOM ? BASE_SIZE : BASE_SIZE * (2**(zoom-BASE_ZOOM));
+    const absolute_x = x;
+    const absolute_y = y;
+    const size = BASE_SIZE * (2**(zoom-BASE_ZOOM));
+    //console.log("coords", absolute_x, absolute_y, "size", size, "raw", coords);
+
+    //console.log("elementIndiciesWithImages", elementIndiciesWithImages);
+    if (elementIndiciesWithImages.includes(elementId)) {
+        return `/tiles_cut/${Math.min(size, MAX_SIZE_PER_CELL)}/${elementId}/${absolute_x%TILES_PER_CELL}-${TILES_PER_CELL-1-(absolute_y)%TILES_PER_CELL}.png`; // TODO: y-coordinate up or down?
+    }
+    const colorHex = getColorHexById(elementId);
+    return `/hex_colors_32/${colorHex}.png`;
+}
+
 // Initialize map after image data is loaded
 async function initializeMap() {
-    await loadImageData(); // Ensure image data is loaded first
 
-    initialMap.value = L.map('map').setView([23.8041, 90.4152], BASE_ZOOM);
+  initialMap.value = L.map('map').setView([23.8041, 90.4152], BASE_ZOOM);
 
-    //L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    //    maxZoom: 19,
-    //    attribution: '&copy; <a href="http://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-    //}).addTo(initialMap.value);
+L.GridLayer.MyCanvasLayer = L.GridLayer.extend({
+    createTile: function (coords, done) {
+        var tile = document.createElement('canvas');
+        var size = this.getTileSize();
+        tile.width = size.x;
+        tile.height = size.y;
+        var ctx = tile.getContext('2d');
 
-    L.TileLayer.MyCustomLayer = L.TileLayer.extend({
-        getTileUrl: function (coords) {
-            //console.log(coords);
-            const url = getTileUrl(coords);
-            //console.log(url);
-            return url; // Now sync function
-        },
-        _addTile: function (coords, container) {
-            //console.log("_addTile", this.options.tileSize);
-            if (true || coords.z < BASE_ZOOM) {
-                this.options.tileSize = BASE_SIZE * (2**(coords.z - BASE_ZOOM));
-                //console.log("coords.z less ", coords.z, " < " , BASE_ZOOM, " zoom to ", this.options.tileSize);
-            } else {
-                this.options.tileSize = BASE_SIZE;
-                //console.log("coords.z 50 ", coords.z, " >= " , BASE_ZOOM, " zoom to ", this.options.tileSize);
-            }
-            //console.log("_addTile 2", this.options.tileSize);
-            L.TileLayer.prototype._addTile.call(this, coords, container);
+        if (coords.z < BASE_ZOOM) {
+            this.options.tileSize = BASE_SIZE;
+            console.log("a - creating zoomed tile");
+            createZoomedTile(coords, BASE_SIZE, BASE_ZOOM).then(canvas => {
+                ctx.drawImage(canvas, 0, 0, size.x, size.y);
+                done(null, tile);
+            }).catch(err => {
+                console.error("Error creating zoomed tile:", err);
+                done(err, tile);
+            });
+        } else {
+            this.options.tileSize = BASE_SIZE * (2**(coords.z - BASE_ZOOM));
+            console.log("b - fetching tile");
+            var img = new Image();
+            img.crossOrigin = "Anonymous"; // Avoid CORS issues if necessary
+            img.onload = function () {
+                ctx.drawImage(img, 0, 0, size.x, size.y);
+                done(null, tile);
+            };
+            img.onerror = function (err) {
+                console.error("Tile load error", err);
+                done(err, tile);
+            };
+            img.src = getTileUrl(coords);
         }
-    });
 
-    // Static factory function
-    L.tileLayer.myCustomLayer = function (templateUrl, options) {
-        return new L.TileLayer.MyCustomLayer(templateUrl, options);
-    };
-    // Add the custom layer to the map
-    L.tileLayer.myCustomLayer('images/map/{z}/C{x}_R{y}.jpg', {
-        minZoom: 0,
-        maxZoom: MAX_LOSSLESS_ZOOM,
-        crs: L.CRS.Simple,
-        tms: false,
-        continuousWorld: false,
-        noWrap: false,
-        defaultRadius: 1,
-        tileSize: BASE_SIZE,
-        worldCopyJump: false,
-    }).addTo(initialMap.value);
-    let bounds = [[0, 0], [imageWidth, imageHeight]];
-    initialMap.value.setMaxBounds(bounds); // TODO: keep?
+        return tile;
+    }
+});
+
+// Static factory function
+L.gridLayer.myCanvasLayer = function (options) {
+    return new L.GridLayer.MyCanvasLayer(options);
+};
+
+// Add the custom canvas layer to the map
+L.gridLayer.myCanvasLayer({
+    minZoom: 0,
+    maxZoom: MAX_LOSSLESS_ZOOM,
+    tileSize: BASE_SIZE,
+    continuousWorld: false,
+    noWrap: false,
+    crs: L.CRS.Simple,
+    worldCopyJump: false
+}).addTo(initialMap.value);
+
+let bounds = [[0, 0], [imageWidth, imageHeight]];
+//initialMap.value.setMaxBounds(bounds); // TODO: change?
+
 }
 
 let colorMap = {}; // Store preloaded ID-to-HEX mappings
@@ -386,8 +702,20 @@ function getColorHexById(idx) {
 // Initialize color data before map starts
 async function initializeApp() {
     await loadColorData(); // Preload color mappings
-    await initializeMap(); // Then initialize the map
     await loadValidElementIdxImages(); // Preload valid element idx images
+    await loadImageData(); // Ensure image data is loaded first
+    await initializeMap(); // Then initialize the map
+    const testZoom = 5;
+    const startTime = performance.now();
+    console.log(createZoomedTile({x : Math.floor(330*2**(testZoom-BASE_ZOOM)), y : Math.floor(300*2**(testZoom-BASE_ZOOM)), z : testZoom}, BASE_SIZE, BASE_ZOOM).then(canvas => {
+      console.log("createZoomedTile");
+      console.log(canvas);
+                    let url = canvas.toDataURL("image/png");
+                    console.log(url);
+                  }));
+                  const endTime = performance.now();
+                  const executionTime = endTime - startTime;
+                  console.log(`Execution time: ${executionTime} milliseconds`);
 }
 
 // Start the application
