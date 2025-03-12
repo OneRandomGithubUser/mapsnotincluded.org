@@ -407,9 +407,11 @@ function getAlphaMask(bitmask, boundarySize) {
     return maskCanvas;
 }
 
+const DISABLE_MEASURE_ZOOMED_TILE_TIME = false;
+
 async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
-  //const timeStart = performance.now();
-  //console.log("start createZoomedTile");
+  const timeStart = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+  DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("start createZoomedTile");
 
     // Decide how many squares in each dimension. 
     // For example, if BASE_ZOOM=7 and z=3, scale=2^(7-3)=16 => 16 squares horizontally.
@@ -422,11 +424,11 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
 
     // The final offscreen canvas:
 
-    //const timeCheckpoint0a = performance.now();
-    //console.log("checkpoint 0a", timeCheckpoint0a - timeStart);
+    const timeCheckpoint0a = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+    DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("checkpoint 0a", timeCheckpoint0a - timeStart);
     const offCanvas = document.createElement('canvas');
-  //const timeCheckpoint0b = performance.now();
-  //console.log("checkpoint 0b", timeCheckpoint0b - timeCheckpoint0a);
+  const timeCheckpoint0b = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+  DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("checkpoint 0b", timeCheckpoint0b - timeCheckpoint0a);
     offCanvas.width = boundarySize * scale;
     offCanvas.height = boundarySize * scale;
     //console.log("offCanvas.width, offCanvas.height", offCanvas.width, offCanvas.height);
@@ -446,12 +448,12 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
 
     // For each boundary square [i,j], we need the 4 corners' element IDs:
     // corners: (i, j), (i+1, j), (i, j+1), (i+1, j+1).
-  //const timeCheckpoint1 = performance.now();
-  //console.log("checkpoint 1", timeCheckpoint1 - timeCheckpoint0b);
+  const timeCheckpoint1 = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+  DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("checkpoint 1", timeCheckpoint1 - timeCheckpoint0b);
     for (let j = 0; j < gridSize; j++) {
-      //const timeCheckpoint2 = performance.now();
+      const timeCheckpoint2 = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
         for (let i = 0; i < gridSize; i++) {
-          //const timeCheckpoint3 = performance.now();
+          const timeCheckpoint3 = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
 
             // The top-left corner in that 17×17 set:
             const topLeftID     = getPixelValue(startWorldX + i,   startWorldY + j);
@@ -475,17 +477,17 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
             setCorner(bottomRightID, 8);
             //console.log("i, j", i, j)
 
-          //const timeCheckpoint3a = performance.now();
-          //console.log("    checkpoint 3a", timeCheckpoint3a - timeCheckpoint3);
+          const timeCheckpoint3a = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+          DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("      checkpoint 3a", timeCheckpoint3a - timeCheckpoint3);
 
             // For each unique ID, get the alpha mask and then draw the tile:
             for (const [elementID, bitmask] of cornerMap.entries()) {
-              //const timeCheckpoint3b = performance.now();
+              const timeCheckpoint3b = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
                 // 1) Build or reuse the alpha mask:
                 const alphaMaskCanvas = getAlphaMask(bitmask, scale);
                 const alphaMaskCtx = alphaMaskCanvas.getContext('2d');
-                //const timeCheckpoint3c = performance.now();
-                //console.log("    checkpoint 3c", timeCheckpoint3c - timeCheckpoint3b);
+                const timeCheckpoint3c = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+                DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("      checkpoint 3c", timeCheckpoint3c - timeCheckpoint3b);
 
                 // 2) Load the tile image for the offset coords & that elementID
                 //    The "offsetCoords" might just be your same (x, y, z), or 
@@ -494,14 +496,14 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
                 const tileUrl = getOffsetTileUrl(offsetCoords, elementID);
                 //console.log("loadImage url at coord", tileUrl, "for element", elementID, offsetCoords, cornerMap);
 
-                //const timeCheckpoint3ca = performance.now();
-                //console.log("    checkpoint 3ca", timeCheckpoint3ca - timeCheckpoint3c);
+                const timeCheckpoint3ca = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+                DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("      checkpoint 3ca", timeCheckpoint3ca - timeCheckpoint3c);
 
                 // We'll load it via a temporary <img>:
                 let img = await loadImage(tileUrl);
 
-                //const timeCheckpoint3d = performance.now();
-                //console.log("    checkpoint 3d", timeCheckpoint3d - timeCheckpoint3ca);
+                const timeCheckpoint3d = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+                DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("      checkpoint 3d", timeCheckpoint3d - timeCheckpoint3ca);
 
                 // 3) Combine the alpha mask and the tile image 
                 //    by drawing the tile onto alphaMaskCanvas using "source-over",
@@ -521,8 +523,8 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
                 alphaMaskCtx.globalCompositeOperation = 'source-in';
                 alphaMaskCtx.drawImage(img, 0, 0, scale, scale);
                 alphaMaskCtx.globalCompositeOperation = 'source-over';
-                //const timeCheckpoint3e = performance.now();
-                //console.log("    checkpoint 3e", timeCheckpoint3e - timeCheckpoint3d);
+                const timeCheckpoint3e = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+                DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("      checkpoint 3e", timeCheckpoint3e - timeCheckpoint3d);
                 //console.log("draw tile", alphaMaskCanvas.toDataURL("image/png"));
 
                 // alphaMaskCanvas is now the tile image, 
@@ -548,18 +550,20 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
                 offCtx.drawImage(alphaMaskCanvas, drawX, drawY);
                 //console.log("one draw", offCanvas.toDataURL("image/png"));
                 //console.log("drawX, drawY", drawX, drawY, scale, scale);
+                const timeCheckpoint3f = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+                DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("      checkpoint 3f", timeCheckpoint3f - timeCheckpoint3e);
             }
             //console.log("cell draw", offCanvas.toDataURL("image/png"));
-            //const timeCheckpoint4 = performance.now();
-            //console.log("  checkpoint 4", timeCheckpoint4 - timeCheckpoint3);
+            const timeCheckpoint4 = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+            DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("    checkpoint 4", timeCheckpoint4 - timeCheckpoint3);
         }
-        //const timeCheckpoint5 = performance.now();
-        //console.log("  checkpoint 5", timeCheckpoint5 - timeCheckpoint2);
+        const timeCheckpoint5 = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+        DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("  checkpoint 5", timeCheckpoint5 - timeCheckpoint2);
     }
 
-    //const timeEnd = performance.now();
-    //console.log("end createZoomedTile", timeEnd - timeCheckpoint1);
-    //console.log("total createZoomedTile", timeEnd - timeStart);
+    const timeEnd = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+    DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("end createZoomedTile", timeEnd - timeCheckpoint1);
+    DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("total createZoomedTile", timeEnd - timeStart);
 
     // Return the completed canvas
     return offCanvas;
