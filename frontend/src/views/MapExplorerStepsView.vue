@@ -408,6 +408,9 @@ function getAlphaMask(bitmask, boundarySize) {
 }
 
 async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
+  //const timeStart = performance.now();
+  //console.log("start createZoomedTile");
+
     // Decide how many squares in each dimension. 
     // For example, if BASE_ZOOM=7 and z=3, scale=2^(7-3)=16 => 16 squares horizontally.
 
@@ -419,7 +422,11 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
 
     // The final offscreen canvas:
 
+    //const timeCheckpoint0a = performance.now();
+    //console.log("checkpoint 0a", timeCheckpoint0a - timeStart);
     const offCanvas = document.createElement('canvas');
+  //const timeCheckpoint0b = performance.now();
+  //console.log("checkpoint 0b", timeCheckpoint0b - timeCheckpoint0a);
     offCanvas.width = boundarySize * scale;
     offCanvas.height = boundarySize * scale;
     //console.log("offCanvas.width, offCanvas.height", offCanvas.width, offCanvas.height);
@@ -439,8 +446,13 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
 
     // For each boundary square [i,j], we need the 4 corners' element IDs:
     // corners: (i, j), (i+1, j), (i, j+1), (i+1, j+1).
+  //const timeCheckpoint1 = performance.now();
+  //console.log("checkpoint 1", timeCheckpoint1 - timeCheckpoint0b);
     for (let j = 0; j < gridSize; j++) {
+      //const timeCheckpoint2 = performance.now();
         for (let i = 0; i < gridSize; i++) {
+          //const timeCheckpoint3 = performance.now();
+
             // The top-left corner in that 17×17 set:
             const topLeftID     = getPixelValue(startWorldX + i,   startWorldY + j);
             const topRightID    = getPixelValue(startWorldX + i+1, startWorldY + j);
@@ -463,11 +475,17 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
             setCorner(bottomRightID, 8);
             //console.log("i, j", i, j)
 
+          //const timeCheckpoint3a = performance.now();
+          //console.log("    checkpoint 3a", timeCheckpoint3a - timeCheckpoint3);
+
             // For each unique ID, get the alpha mask and then draw the tile:
             for (const [elementID, bitmask] of cornerMap.entries()) {
+              //const timeCheckpoint3b = performance.now();
                 // 1) Build or reuse the alpha mask:
                 const alphaMaskCanvas = getAlphaMask(bitmask, scale);
                 const alphaMaskCtx = alphaMaskCanvas.getContext('2d');
+                //const timeCheckpoint3c = performance.now();
+                //console.log("    checkpoint 3c", timeCheckpoint3c - timeCheckpoint3b);
 
                 // 2) Load the tile image for the offset coords & that elementID
                 //    The "offsetCoords" might just be your same (x, y, z), or 
@@ -476,18 +494,20 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
                 const tileUrl = getOffsetTileUrl(offsetCoords, elementID);
                 //console.log("loadImage url at coord", tileUrl, "for element", elementID, offsetCoords, cornerMap);
 
+                //const timeCheckpoint3ca = performance.now();
+                //console.log("    checkpoint 3ca", timeCheckpoint3ca - timeCheckpoint3c);
+
                 // We'll load it via a temporary <img>:
                 let img = await loadImage(tileUrl);
+
+                //const timeCheckpoint3d = performance.now();
+                //console.log("    checkpoint 3d", timeCheckpoint3d - timeCheckpoint3ca);
 
                 // 3) Combine the alpha mask and the tile image 
                 //    by drawing the tile onto alphaMaskCanvas using "source-over",
                 //    then we’ll draw alphaMaskCanvas onto offCanvas.
                 
                 
-                const tileCanvas = document.createElement('canvas');
-                tileCanvas.width = boundarySize;
-                tileCanvas.height = boundarySize;
-                const tileCtx = tileCanvas.getContext('2d'); // TODO: remove if not used
                 // Clear the alphaMask first:
 
                 //console.log(alphaMaskCanvas.toDataURL("image/png"));
@@ -501,6 +521,8 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
                 alphaMaskCtx.globalCompositeOperation = 'source-in';
                 alphaMaskCtx.drawImage(img, 0, 0, scale, scale);
                 alphaMaskCtx.globalCompositeOperation = 'source-over';
+                //const timeCheckpoint3e = performance.now();
+                //console.log("    checkpoint 3e", timeCheckpoint3e - timeCheckpoint3d);
                 //console.log("draw tile", alphaMaskCanvas.toDataURL("image/png"));
 
                 // alphaMaskCanvas is now the tile image, 
@@ -528,22 +550,58 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
                 //console.log("drawX, drawY", drawX, drawY, scale, scale);
             }
             //console.log("cell draw", offCanvas.toDataURL("image/png"));
+            //const timeCheckpoint4 = performance.now();
+            //console.log("  checkpoint 4", timeCheckpoint4 - timeCheckpoint3);
         }
+        //const timeCheckpoint5 = performance.now();
+        //console.log("  checkpoint 5", timeCheckpoint5 - timeCheckpoint2);
     }
+
+    //const timeEnd = performance.now();
+    //console.log("end createZoomedTile", timeEnd - timeCheckpoint1);
+    //console.log("total createZoomedTile", timeEnd - timeStart);
 
     // Return the completed canvas
     return offCanvas;
 }
 
 // Helper: load an <img> from a URL and await it
+const imageCache = new Map();
+
+async function preloadTiles() {
+  // Cache images from elementIndiciesWithImages
+  for (const elementId of elementIndiciesWithImages) {
+    for (let x = 0; x < TILES_PER_CELL; x++) {
+      for (let y = 0; y < TILES_PER_CELL; y++) {
+        for (let z = 0; z < get_zoom_from_size(40); z++) {
+          const url = getOffsetTileUrl({ x, y, z: 0 }, elementId);
+          loadImage(url);
+        } 
+      }
+    }
+  }
+}
+
 function loadImage(url) {
     return new Promise((resolve, reject) => {
+        if (imageCache.has(url)) {
+          //console.log("cache hit");
+            return resolve(imageCache.get(url));
+        }
+        //console.log("cache miss");
+
         const img = new Image();
-        img.onload = () => resolve(img);
+        img.onload = () => {
+            if (img.width < 40) {
+                imageCache.set(url, img); // Cache the image if width < 40px
+            }
+            resolve(img);
+        };
         img.onerror = reject;
         img.src = url;
     });
 }
+
 
 
 const BASE_ZOOM = 7; // Base zoom level for the map
@@ -563,7 +621,7 @@ function getTileUrl(coords) {
     // const size = zoom > BASE_ZOOM ? BASE_SIZE : BASE_SIZE * (2**(zoom-BASE_ZOOM));
     const absolute_x = x;
     const absolute_y = y;
-    const size = BASE_SIZE * (2**(zoom-BASE_ZOOM));
+    const size = get_size_from_zoom(zoom);
     //console.log("coords", absolute_x, absolute_y, "size", size, "raw", coords);
 
     const pixelValue = getPixelValue(absolute_x, absolute_y);
@@ -577,6 +635,14 @@ function getTileUrl(coords) {
     return `/hex_colors_32/${colorHex}.png`;
 }
 
+function get_size_from_zoom(zoom) {
+  return BASE_SIZE * (2**(zoom-BASE_ZOOM));
+}
+
+function get_zoom_from_size(size) {
+  return Math.log2(size / BASE_SIZE) + BASE_ZOOM;
+}
+
 function getOffsetTileUrl(coords, elementId) {
     // Adjust x/y to match tile indexing
     const x = coords.x;
@@ -587,7 +653,7 @@ function getOffsetTileUrl(coords, elementId) {
     // const size = zoom > BASE_ZOOM ? BASE_SIZE : BASE_SIZE * (2**(zoom-BASE_ZOOM));
     const absolute_x = x;
     const absolute_y = y;
-    const size = BASE_SIZE * (2**(zoom-BASE_ZOOM));
+    const size = get_size_from_zoom(zoom);
     //console.log("coords", absolute_x, absolute_y, "size", size, "raw", coords);
 
     //console.log("elementIndiciesWithImages", elementIndiciesWithImages);
@@ -699,6 +765,15 @@ function getColorHexById(idx) {
     return uiColorMap[idx] || "000000"; // Default to black if ID not found TODO: change from material overlay to looking more like in-game
 }
 
+async function lowPriorityTasks() {
+    const timeStart = performance.now();
+    console.log("lowPriorityTasks start");
+    await preloadTiles();
+    const timeEnd = performance.now();
+    const executionTime = timeEnd - timeStart;
+    console.log("lowPriorityTasks end:", executionTime, "ms");
+}
+
 // Initialize color data before map starts
 async function initializeApp() {
     await loadColorData(); // Preload color mappings
@@ -716,6 +791,7 @@ async function initializeApp() {
                   const endTime = performance.now();
                   const executionTime = endTime - startTime;
                   console.log(`Execution time: ${executionTime} milliseconds`);
+    lowPriorityTasks();
 }
 
 // Start the application
