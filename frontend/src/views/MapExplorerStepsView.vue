@@ -500,7 +500,7 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
                 DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("      checkpoint 3ca", timeCheckpoint3ca - timeCheckpoint3c);
 
                 // We'll load it via a temporary <img>:
-                let img = await loadImage(tileUrl);
+                //let img = await loadImage(tileUrl); // TODO: remove
 
                 const timeCheckpoint3d = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
                 DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("      checkpoint 3d", timeCheckpoint3d - timeCheckpoint3ca);
@@ -521,7 +521,8 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
                 //tileCtx.drawImage(alphaMaskCanvas, 0, 0, scale, scale);
                 //console.log("draw alpha", alphaMaskCanvas.toDataURL("image/png"));
                 alphaMaskCtx.globalCompositeOperation = 'source-in';
-                alphaMaskCtx.drawImage(img, 0, 0, scale, scale);
+                drawTiles(alphaMaskCtx, offsetCoords, elementID);
+                //alphaMaskCtx.drawImage(img, 0, 0, scale, scale);
                 alphaMaskCtx.globalCompositeOperation = 'source-over';
                 const timeCheckpoint3e = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
                 DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("      checkpoint 3e", timeCheckpoint3e - timeCheckpoint3d);
@@ -569,14 +570,99 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
     return offCanvas;
 }
 
+// Preload all mipmap images into an object
+const mipmapCanvases = {};
+const hexColorCanvases = {};
+const HEX_COLOR_MIPMAP_SIZES = [16];// [16, 32, 64];
+const MIN_HEX_COLOR_SIZE = Math.min(HEX_COLOR_MIPMAP_SIZES);
+const MAX_HEX_COLOR_SIZE = Math.max(HEX_COLOR_MIPMAP_SIZES);
+async function preloadMipmaps() {
+    const sizes = [16, 32, 64, 128, 256];
+    for (let size of sizes) {
+        const img = await loadImage(`tiles_mipmaps/${size}x${size}.png`);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        mipmapCanvases[size] = canvas;
+    }
+    for (let size of HEX_COLOR_MIPMAP_SIZES) {
+        const img = await loadImage(`/hex_colors_mipmap/${size}x${size}.png`);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        hexColorCanvases[size] = canvas;
+    }
+}
+
+async function drawTiles(canvasCtx, offsetCoords, elementID) {
+    if (!mipmapCanvases[16]) {
+        await preloadMipmaps();
+    }
+    const scale = 2 ** Math.floor(Math.log2(BASE_SIZE * 2 ** (offsetCoords.z - BASE_ZOOM))); // TODO: make a centralized function for scale
+
+    // Find element index in sorted list
+    const index = elementIndiciesWithImages.indexOf(elementID);
+    if (index === -1) {
+      // If elementID is not found, use the UI color
+      let hexColorScale = scale;
+      if (!hexColorCanvases[hexColorScale]) {
+        if (scale < MIN_HEX_COLOR_SIZE) {
+          hexColorScale = MIN_HEX_COLOR_SIZE;
+        } else if (scale > MAX_HEX_COLOR_SIZE) {
+          hexColorScale = MAX_HEX_COLOR_SIZE;
+        } else {
+          console.error("No hex color canvas found for scale", scale);
+          hexColorScale = MIN_HEX_COLOR_SIZE;
+        }
+      }
+      let hexColorCanvas = hexColorCanvases[hexColorScale];
+      const colorHexX = elementID * hexColorScale; // TODO: assumption that every element ID will have a ui color
+      const colorHexY = 0;
+      // draw onto canvasCtx using nearest-neighbor interpolation
+      const prevImageSmoothingEnabled = canvasCtx.imageSmoothingEnabled;
+      canvasCtx.imageSmoothingEnabled = false;
+      canvasCtx.drawImage(hexColorCanvas, colorHexX, colorHexY, hexColorScale, hexColorScale, 0, 0, scale, scale);
+      canvasCtx.imageSmoothingEnabled = prevImageSmoothingEnabled;
+      return;
+    }
+
+    // Determine mipmap size
+    const textureSize = scale * CELLS_PER_TILE;
+    const mipmap = mipmapCanvases[textureSize];
+    if (!mipmap) return;
+
+    const texturesPerRow = mipmap.width / scale; // Number of tiles per row in mipmap
+
+    // Get element position in mipmap
+    const srcX = (index % texturesPerRow) * textureSize;
+    const srcY = Math.floor(index / texturesPerRow) * textureSize;
+
+    // Get the sub-tile location within that tile
+    const tileSize = BASE_SIZE;
+    const tileIndexX = offsetCoords.x % CELLS_PER_TILE;
+    const tileIndexY = offsetCoords.y % CELLS_PER_TILE;
+    const subTileX = srcX + tileIndexX * scale;
+    const subTileY = srcY + tileIndexY * scale; // (CELLS_PER_TILE - 1 - tileIndexY) * scale; // Flip y
+
+    // Copy sub-tile to canvas
+    canvasCtx.drawImage(mipmap, subTileX, subTileY, scale, scale, 0, 0, scale, scale);
+    console.log("drawTiles", offsetCoords, elementID, index, srcX, srcY, tileIndexX, tileIndexY, scale, scale);
+}
+
+
 // Helper: load an <img> from a URL and await it
 const imageCache = new Map();
 
+// TODO: remove this function
 async function preloadTiles() {
   // Cache images from elementIndiciesWithImages
   for (const elementId of elementIndiciesWithImages) {
-    for (let x = 0; x < TILES_PER_CELL; x++) {
-      for (let y = 0; y < TILES_PER_CELL; y++) {
+    for (let x = 0; x < CELLS_PER_TILE; x++) {
+      for (let y = 0; y < CELLS_PER_TILE; y++) {
         for (let z = 0; z < get_zoom_from_size(40); z++) {
           const url = getOffsetTileUrl({ x, y, z: 0 }, elementId);
           loadImage(url);
@@ -606,11 +692,9 @@ function loadImage(url) {
     });
 }
 
-
-
 const BASE_ZOOM = 7; // Base zoom level for the map
 const BASE_SIZE = 128; // Base tile size for the map
-const TILES_PER_CELL = 8; // Number of tiles per cell
+const CELLS_PER_TILE = 8; // Number of cells per texture tile, lengthwise
 const MAX_SIZE_PER_CELL = 128; // Maximum size per cell
 const MAX_LOSSLESS_ZOOM = Math.floor(Math.log(MAX_SIZE_PER_CELL / BASE_SIZE) / Math.log(2)) + BASE_ZOOM; // Maximum zoom level for lossless tiles
 
@@ -633,7 +717,7 @@ function getTileUrl(coords) {
 
     //console.log("elementIndiciesWithImages", elementIndiciesWithImages);
     if (elementIndiciesWithImages.includes(pixelValue)) {
-        return `/tiles_cut/${Math.min(size, MAX_SIZE_PER_CELL)}/${pixelValue}/${absolute_x%TILES_PER_CELL}-${TILES_PER_CELL-1-(absolute_y)%TILES_PER_CELL}.png`; // TODO: y-coordinate up or down?
+        return `/tiles_cut/${Math.min(size, MAX_SIZE_PER_CELL)}/${pixelValue}/${absolute_x%CELLS_PER_TILE}-${CELLS_PER_TILE-1-(absolute_y)%CELLS_PER_TILE}.png`; // TODO: y-coordinate up or down?
     }
     const colorHex = getColorHexById(pixelValue);
     return `/hex_colors_32/${colorHex}.png`;
@@ -662,7 +746,7 @@ function getOffsetTileUrl(coords, elementId) {
 
     //console.log("elementIndiciesWithImages", elementIndiciesWithImages);
     if (elementIndiciesWithImages.includes(elementId)) {
-        return `/tiles_cut/${Math.min(size, MAX_SIZE_PER_CELL)}/${elementId}/${absolute_x%TILES_PER_CELL}-${TILES_PER_CELL-1-(absolute_y)%TILES_PER_CELL}.png`; // TODO: y-coordinate up or down?
+        return `/tiles_cut/${Math.min(size, MAX_SIZE_PER_CELL)}/${elementId}/${absolute_x%CELLS_PER_TILE}-${CELLS_PER_TILE-1-(absolute_y)%CELLS_PER_TILE}.png`; // TODO: y-coordinate up or down?
     }
     const colorHex = getColorHexById(elementId);
     return `/hex_colors_32/${colorHex}.png`;
@@ -772,7 +856,7 @@ function getColorHexById(idx) {
 async function lowPriorityTasks() {
     const timeStart = performance.now();
     console.log("lowPriorityTasks start");
-    await preloadTiles();
+    // await preloadTiles();
     const timeEnd = performance.now();
     const executionTime = timeEnd - timeStart;
     console.log("lowPriorityTasks end:", executionTime, "ms");
@@ -783,6 +867,7 @@ async function initializeApp() {
     await loadColorData(); // Preload color mappings
     await loadValidElementIdxImages(); // Preload valid element idx images
     await loadImageData(); // Ensure image data is loaded first
+    await preloadMipmaps(); // Preload mipmaps
     await initializeMap(); // Then initialize the map
     const testZoom = 5;
     const startTime = performance.now();
