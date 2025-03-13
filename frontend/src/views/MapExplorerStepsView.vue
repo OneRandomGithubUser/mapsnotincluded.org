@@ -361,10 +361,6 @@ function getAlphaMask(bitmask, boundarySize, maskCanvas) {
     // Create a small offscreen canvas for the alpha mask
     const maskCtx = maskCanvas.getContext('2d');
 
-    // paint the entire mask white
-    maskCtx.fillStyle = 'white';
-    maskCtx.fillRect(0, 0, boundarySize, boundarySize);
-
     // We'll build raw RGBA data. By default, RGBA = (0, 0, 0, 0).
     const data = new Uint8ClampedArray(boundarySize * boundarySize * 4);
 
@@ -414,180 +410,105 @@ const DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_2 = false;
 const DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_1 = false;
 
 async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
-  let performanceMetrics = "";
-  const timeStart = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
-  DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("start createZoomedTile");
+    let performanceMetrics = "";
+    const timeStart = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
+    DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("start createZoomedTile");
 
-    // Decide how many squares in each dimension. 
-    // For example, if BASE_ZOOM=7 and z=3, scale=2^(7-3)=16 => 16 squares horizontally.
+    const scale = get_size_from_zoom(z);
+    const gridSize = 2 ** (BASE_ZOOM - z) + 1;
+    const boundarySize = 2 ** (BASE_ZOOM - z);
 
-    //console.log("createZoomedTile", x, y, z, BASE_SIZE, BASE_ZOOM);
-    const scale = get_size_from_zoom(z);  // size of each tile's edge in pixels
-    const gridSize = 2 ** (BASE_ZOOM - z) + 1;  // number of real tiles in each edge e.g., 17
-    const boundarySize = 2 ** (BASE_ZOOM - z); // Each boundary square is 16×16 (adjust if needed)
-    //console.log("scale", scale, "gridSize", gridSize, "boundarySize", boundarySize);
-
-    // The final offscreen canvas:
-
-    const timeCheckpoint0a = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
-    DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performanceMetrics += ["checkpoint 0a", timeCheckpoint0a - timeStart].join(" ") + "\n";
+    // Offscreen canvas for final output
     const offCanvas = document.createElement('canvas');
-  const timeCheckpoint0b = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
-  DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performanceMetrics += ["checkpoint 0b", timeCheckpoint0b - timeCheckpoint0a].join(" ") + "\n";
     offCanvas.width = boundarySize * scale;
     offCanvas.height = boundarySize * scale;
-    //console.log("offCanvas.width, offCanvas.height", offCanvas.width, offCanvas.height);
     const offCtx = offCanvas.getContext('2d');
-
-    // Clear it first
     offCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
 
-    // "Corner" sampling:
-    // top-left corner in world coordinates:
-    const startWorldX = x * boundarySize; 
-    const startWorldY = y * boundarySize; 
-    // So we’ll read the 17×17 set of actual tile centers from
-    // (startWorldX, startWorldY) to (startWorldX+gridSize, startWorldY+gridSize).
+    // Alpha mask canvas
+    const alphaMaskCanvas = document.createElement('canvas');
+    alphaMaskCanvas.width = scale;
+    alphaMaskCanvas.height = scale;
+    const alphaMaskCtx = alphaMaskCanvas.getContext('2d');
+    alphaMaskCtx.globalCompositeOperation = 'source-over';
 
-    //console.log("startWorldX, startWorldY", startWorldX, startWorldY);
+    const startWorldX = x * boundarySize;
+    const startWorldY = y * boundarySize;
 
-    // For each boundary square [i,j], we need the 4 corners' element IDs:
-    // corners: (i, j), (i+1, j), (i, j+1), (i+1, j+1).
-  const timeCheckpoint1 = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
-  
-  const alphaMaskCanvas = document.createElement('canvas');
-  alphaMaskCanvas.width = scale;
-  alphaMaskCanvas.height = scale;
-  const alphaMaskCtx = alphaMaskCanvas.getContext('2d');
-  alphaMaskCtx.globalCompositeOperation = 'source-over';
+    // **Step 1: Preload all tile images in parallel**
+    const tilePromises = [];
+    const tileCoords = [];
 
-  DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performanceMetrics += ["checkpoint 1", timeCheckpoint1 - timeCheckpoint0b].join(" ") + "\n";
     for (let j = 0; j < gridSize; j++) {
-      const timeCheckpoint2 = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_1 ? null : performance.now();
         for (let i = 0; i < gridSize; i++) {
-          const timeCheckpoint3 = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_2 ? null : performance.now();
-
-            // The top-left corner in that 17×17 set:
-            const topLeftID     = getPixelValue(startWorldX + i,   startWorldY + j);
+            const topLeftID     = getPixelValue(startWorldX + i, startWorldY + j);
             const topRightID    = getPixelValue(startWorldX + i+1, startWorldY + j);
-            const bottomLeftID  = getPixelValue(startWorldX + i,   startWorldY + j+1);
+            const bottomLeftID  = getPixelValue(startWorldX + i, startWorldY + j+1);
             const bottomRightID = getPixelValue(startWorldX + i+1, startWorldY + j+1);
 
             if (topLeftID === null || topRightID === null || bottomLeftID === null || bottomRightID === null) {
-                // console.log("skipping", i, j);
                 continue;
             }
 
-            // Now find the unique IDs among these four:
-            // For each unique ID, figure out which bits apply 
-            // (top-left=1, top-right=2, bottom-left=4, bottom-right=8)
-            const cornerMap = new Map(); // Map elementID => bitmask
+            // Determine unique IDs and bitmasks
+            const cornerMap = new Map();
             function setCorner(id, bit) {
                 if (!cornerMap.has(id)) {
                     cornerMap.set(id, 0);
                 }
                 cornerMap.set(id, cornerMap.get(id) | bit);
             }
-            setCorner(topLeftID,     1);
-            setCorner(topRightID,    2);
-            setCorner(bottomLeftID,  4);
+            setCorner(topLeftID, 1);
+            setCorner(topRightID, 2);
+            setCorner(bottomLeftID, 4);
             setCorner(bottomRightID, 8);
-            //console.log("i, j", i, j)
 
-          const timeCheckpoint3a = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performance.now();
-          DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performanceMetrics += ["      checkpoint 3a", timeCheckpoint3a - timeCheckpoint3].join(" ") + "\n";
-
-            // For each unique ID, get the alpha mask and then draw the tile:
             for (const [elementID, bitmask] of cornerMap.entries()) {
-              const timeCheckpoint3b = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performance.now();
-                // 1) Build or reuse the alpha mask:
-                getAlphaMask(bitmask, scale, alphaMaskCanvas);
-                const timeCheckpoint3c = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performance.now();
-                DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performanceMetrics += ["      checkpoint 3c", timeCheckpoint3c - timeCheckpoint3b].join(" ") + "\n";
-
-                // 2) Load the tile image for the offset coords & that elementID
-                //    The "offsetCoords" might just be your same (x, y, z), or 
-                //    you might pass something different if you want sub-tiling, etc.
-                const offsetCoords = { x: (startWorldX + i), y: (startWorldY + j), z };
+                const offsetCoords = { x: startWorldX + i, y: startWorldY + j, z };
                 const tileUrl = getOffsetTileUrl(offsetCoords, elementID);
-                //console.log("loadImage url at coord", tileUrl, "for element", elementID, offsetCoords, cornerMap);
+                tileCoords.push({ i, j, elementID, bitmask, offsetCoords });
 
-                const timeCheckpoint3ca = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performance.now();
-                DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performanceMetrics += ["      checkpoint 3ca", timeCheckpoint3ca - timeCheckpoint3c].join(" ") + "\n";
-
-                // We'll load it via a temporary <img>:
-                //let img = await loadImage(tileUrl); // TODO: remove
-
-                const timeCheckpoint3d = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performance.now();
-                DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performanceMetrics += ["      checkpoint 3d", timeCheckpoint3d - timeCheckpoint3ca].join(" ") + "\n";
-
-                // 3) Combine the alpha mask and the tile image 
-                //    by drawing the tile onto alphaMaskCanvas using "source-over",
-                //    then we’ll draw alphaMaskCanvas onto offCanvas.
-                
-                
-                // Clear the alphaMask first:
-
-                //console.log(alphaMaskCanvas.toDataURL("image/png"));
-                //alphaMaskCtx.clearRect(0, 0, scale, scale);
-                //console.log(alphaMaskCanvas.toDataURL("image/png"));
-
-                // Draw the tile:
-                
-                //tileCtx.drawImage(alphaMaskCanvas, 0, 0, scale, scale);
-                //console.log("draw alpha", alphaMaskCanvas.toDataURL("image/png"));
-                //alphaMaskCtx.globalCompositeOperation = 'source-in'; TODO
-                drawTiles(alphaMaskCtx, offsetCoords, elementID);
-                //alphaMaskCtx.drawImage(img, 0, 0, scale, scale);
-                //alphaMaskCtx.globalCompositeOperation = 'source-over'; TODO
-                const timeCheckpoint3e = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performance.now();
-                DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performanceMetrics += ["      checkpoint 3e", timeCheckpoint3e - timeCheckpoint3d].join(" ") + "\n";
-                //console.log("draw tile", alphaMaskCanvas.toDataURL("image/png"));
-
-                // alphaMaskCanvas is now the tile image, 
-                // but we actually want the mask to cut out corners.
-                // The easiest way: set alphaMaskCtx.globalCompositeOperation = 'destination-in'
-                // and redraw the alpha shape on top.
-
-                //console.log(alphaMaskCanvas.toDataURL("image/png"));
-
-                // Redraw the same alpha mask we already put in alphaMaskCanvas,
-                // or just put the mask again:
-                // (But we already have the alpha in the mask’s pixels, 
-                // so we can skip re-drawing if we built the mask that way from scratch.)
-                // If you need to re-draw, you could do:
-                // alphaMaskCtx.drawImage(originalMask, 0, 0); 
-                // but since getAlphaMask(...) directly returned alpha in the entire region, 
-                // we could also first draw the tile onto a blank canvas, 
-                // then compose with alpha. Approaches vary.
-
-                // Finally, draw alphaMaskCanvas into the final offscreen at the correct offset:
-                const drawX = i * scale;
-                const drawY = j * scale;
-                offCtx.drawImage(alphaMaskCanvas, drawX, drawY);
-                //console.log("one draw", offCanvas.toDataURL("image/png"));
-                //console.log("drawX, drawY", drawX, drawY, scale, scale);
-                const timeCheckpoint3f = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performance.now();
-                DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_3 ? null : performanceMetrics += ["      checkpoint 3f", timeCheckpoint3f - timeCheckpoint3e].join(" ") + "\n";
+                //tilePromises.push(
+                //    fetch(tileUrl)
+                //        .then(response => response.blob())
+                //        .then(blob => createImageBitmap(blob)) // Use ImageBitmap for faster drawing
+                //);
             }
-            //console.log("cell draw", offCanvas.toDataURL("image/png"));
-            const timeCheckpoint4 = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_2 ? null : performance.now();
-            DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_2 ? null : performanceMetrics += ["    checkpoint 4", timeCheckpoint4 - timeCheckpoint3].join(" ") + "\n";
         }
-        const timeCheckpoint5 = DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_1 ? null : performance.now();
-        DISABLE_MEASURE_ZOOMED_TILE_TIME_LEVEL_1 ? null : performanceMetrics += ["  checkpoint 5", timeCheckpoint5 - timeCheckpoint2, "iterations:", gridSize].join(" ") + "\n";
     }
+
+    const loadedTiles = await Promise.all(tilePromises); // Load all images in parallel
+
+    // **Step 2: Ensure drawing completes before returning**
+    await new Promise(resolve => {
+        requestAnimationFrame(() => {
+            tileCoords.forEach(({ i, j, elementID, bitmask, offsetCoords }, index) => {
+                const img = loadedTiles[index];
+
+                // Generate alpha mask for this tile
+                getAlphaMask(bitmask, scale, alphaMaskCanvas);
+
+                // Draw tile onto alphaMaskCanvas
+                alphaMaskCtx.clearRect(0, 0, scale, scale);
+                drawTiles(alphaMaskCtx, offsetCoords, elementID);
+
+                // Composite the final masked image onto the output canvas
+                offCtx.drawImage(alphaMaskCanvas, i * scale, j * scale);
+            });
+
+            resolve(); // Resolve the promise once rendering is complete
+        });
+    });
 
     const timeEnd = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
-    DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performanceMetrics += ["end createZoomedTile", timeEnd - timeCheckpoint1, "iterations:", gridSize * gridSize].join(" ") + "\n";
     DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performanceMetrics += ["total createZoomedTile", timeEnd - timeStart].join(" ") + "\n";
     if (!DISABLE_MEASURE_ZOOMED_TILE_TIME) {
-      console.log(performanceMetrics);
+        console.log(performanceMetrics);
     }
 
-    // Return the completed canvas
     return offCanvas;
 }
+
 
 // Preload all mipmap images into an object
 const mipmapCanvases = {};
