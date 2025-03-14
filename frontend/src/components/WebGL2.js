@@ -13,15 +13,8 @@ export default class WebGL2CanvasManager {
             console.error("WebGL2CanvasManager: WebGL2 is not supported.");
             return;
         }
-
-        
-        loadImages([
-            "/elementIdx8.png",
-            "/temperature32.png",
-            "/mass32.png",
-        ], this.render.bind(this));
     }
-    render(images) {
+    render(images, width, height, left_edge_x, bottom_edge_y) {
         const gl = this.gl;
 
         this.resizeCanvas(images[0].width, images[0].height);
@@ -91,76 +84,91 @@ vec4 texture_displacement_in_pixels(sampler2D tex, vec2 uv_texCoord, vec2pixels 
     vec4 color = texture(tex, uv_displaced_texCoord);
     return color;
 }
- 
+
+// Function to reconstruct 32-bit float from RGBA
+float decodeRGBAtoFloat(vec4 rgba) {
+    // Convert 8-bit components (0-255 range) to unsigned integer (0.0 - 1.0 scaled)
+    uint r = uint(rgba.r * 255.0);
+    uint g = uint(rgba.g * 255.0);
+    uint b = uint(rgba.b * 255.0);
+    uint a = uint(rgba.a * 255.0);
+
+    // Reconstruct IEEE 754 binary representation
+    // uint floatBits = (r << 24) | (g << 16) | (b << 8) | a; // big-endian
+    uint floatBits = (a << 24) | (r << 16) | (g << 8) | b; // little-endian
+
+    // Convert bit pattern to float
+    return uintBitsToFloat(floatBits);
+}
+
+// Interpolates between two colors based on a float value and control points
+vec3 interpolateColor(float value, float v1, vec3 c1, float v2, vec3 c2) {
+    float t = clamp((value - v1) / (v2 - v1), 0.0, 1.0);
+    return mix(c1, c2, t); // Linear interpolation TODO readd
+}
+
+// Converts a float into an RGBA color using control points
+vec4 floatToRGBA(float value) {
+    // Define control points (float value → RGB color)
+    const int numPoints = 8;
+    float controlValues[numPoints] = float[](0.0, -0.1 + 273.15, 9.9 + 273.15, 19.9 + 273.15, 29.9 + 273.15, 36.9 + 273.15, 99.9 + 273.15, 1799.9 + 273.15);
+    vec3 controlColors[numPoints] = vec3[](
+        vec3(128.0/255.0, 254.0/255.0, 240.0/255.0),
+        vec3(50.0/255.0, 170.0/255.0, 209.0/255.0),
+        vec3(41.0/255.0, 139.0/255.0, 209.0/255.0),
+        vec3(62.0/255.0, 208.0/255.0, 73.0/255.0),
+        vec3(197.0/255.0, 209.0/255.0, 18.0/255.0),
+        vec3(209.0/255.0, 145.0/255.0, 45.0/255.0),
+        vec3(206.0/255.0, 80.0/255.0, 78.0/255.0),
+        vec3(206.0/255.0, 19.0/255.0, 18.0/255.0)
+    );
+
+    // Find the nearest two control points for interpolation
+    for (int i = 0; i < numPoints - 1; i++) {
+        if (value >= controlValues[i] && value <= controlValues[i + 1]) {
+            vec3 interpolatedColor = interpolateColor(value, 
+                                                      controlValues[i], controlColors[i], 
+                                                      controlValues[i + 1], controlColors[i + 1]);
+            return vec4(interpolatedColor, 1.0); // Alpha = 1
+        }
+    }
+    
+    // Default: If outside range, clamp to nearest endpoint
+    if (value < controlValues[0]) {
+        return vec4(controlColors[0], 1.0);
+    } else {
+        return vec4(controlColors[numPoints - 1], 1.0);
+    }
+}
+
+
 void main() {
     // Look up a color from the texture.
-    vec4 color = texture(u_image_temperature32, v_texCoord);
+    vec4 color = texture(u_image_elementIdx8, v_texCoord);
+    vec4 temperature_rgba = texture(u_image_temperature32, v_texCoord);
     vec4 downPixelColor = texture_displacement_in_pixels(u_image_elementIdx8, v_texCoord, vec2pixels(vec2(0, -1)));
-    outColor = vec4((color.rgb + downPixelColor.rgb)/2.0, 1);
+
+    // Decode the RGBA color as a single 32-bit float
+    float floatValue = decodeRGBAtoFloat(temperature_rgba);
+
+    // outColor = vec4((color.rgb + downPixelColor.rgb)/2.0, 1);
+    // outColor = vec4(color.rgb, 1);
+    outColor = floatToRGBA(floatValue);
 }
 `;
 
         // Use our boilerplate utils to compile the shaders and link into a program
-        this.vertexShader = this.createShader(gl.VERTEX_SHADER, vertexShaderSource);
-        this.fragmentShader = this.createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
-        this.program = this.createProgram(this.vertexShader, this.fragmentShader);
+        const shaders = this.setupShaders(vertexShaderSource, fragmentShaderSource);
+        this.program = shaders.program;
+        this.vertexShader = shaders.vertexShader;
+        this.fragmentShader = shaders.fragmentShader;
 
-        // look up where the vertex data needs to go.
-        this.positionAttributeLocation = gl.getAttribLocation(this.program, "a_position");
-        this.texCoordAttributeLocation = gl.getAttribLocation(this.program, "a_texCoord");
+        const positionBuffer = this.setupPositionBuffer();
+        const texCoordBuffer = this.setupTextureBuffers();
 
-        // Create a buffer and put a single pixel space rectangle in
-        // it (2 triangles)
-        // Create a buffer and put three 2d clip space points in it
-        let positionBuffer = gl.createBuffer();
-
-        // Bind it to ARRAY_BUFFER (think of it as ARRAY_BUFFER = positionBuffer)
-        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-        var positions = [
-            10, 20,
-            80, 20,
-            10, 30,
-            10, 30,
-            80, 20,
-            80, 30,
-        ];
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
-
-        // Create a vertex array object (attribute state)
-        this.vao = gl.createVertexArray();
-
-        // and make it the one we're currently working with
-        gl.bindVertexArray(this.vao);
-
-        // Turn on the attribute
-        gl.enableVertexAttribArray(this.positionAttributeLocation);
-
-        // Tell the attribute how to get data out of positionBuffer (ARRAY_BUFFER)
-        var size = 2;          // 2 components per iteration
-        var type = gl.FLOAT;   // the data is 32bit floats
-        var normalize = false; // don't normalize the data
-        var stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
-        var offset = 0;        // start at the beginning of the buffer
-        gl.vertexAttribPointer(this.positionAttributeLocation, size, type, normalize, stride, offset);
 
         // provide texture coordinates for the rectangle.
-        var texCoordBuffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-            0.0,  0.0,
-            1.0,  0.0,
-            0.0,  1.0,
-            0.0,  1.0,
-            1.0,  0.0,
-            1.0,  1.0]), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(this.texCoordAttributeLocation);
-        var size = 2;          // 2 components per iteration
-        var type = gl.FLOAT;   // the data is 32bit floats
-        var normalize = false; // don't normalize the data
-        var stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
-        var offset = 0;        // start at the beginning of the buffer
-        gl.vertexAttribPointer(
-            this.texCoordAttributeLocation, size, type, normalize, stride, offset)
+        
         
         // create 2 textures
         var textures = [];
@@ -206,35 +214,16 @@ void main() {
         // Tell it to use our program (pair of shaders)
         gl.useProgram(this.program);
 
-        // Bind the attribute/buffer set we want.
-        gl.bindVertexArray(this.vao);
-
         // look up uniform locations
         this.resolutionUniformLocation = gl.getUniformLocation(this.program, "u_resolution");
-        let u_image_elementIdx8_location = gl.getUniformLocation(this.program, "u_image_elementIdx8");
-        let u_image_temperature32_location = gl.getUniformLocation(this.program, "u_image_temperature32");
-        let u_image_mass32_location = gl.getUniformLocation(this.program, "u_image_mass32");
         
         // Pass in the canvas resolution so we can convert from
         // pixels to clip space in the shader
         gl.uniform2f(this.resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
 
-        // set which texture units to render with.
-        // Tell the shader to get the texture from texture unit 0, unit 1
-        gl.uniform1i(u_image_elementIdx8_location, 0);
-        gl.uniform1i(u_image_temperature32_location, 1);
-        gl.uniform1i(u_image_mass32_location, 1);
-                        
-        // Set each texture unit to use a particular texture.
-        // make unit 0 the active texture unit
-        // (i.e, the unit all other texture commands will affect.)
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, textures[0]);
-        // make unit 1 the active texture unit
-        gl.activeTexture(gl.TEXTURE0 + 1);
-        gl.bindTexture(gl.TEXTURE_2D, textures[1]);
-        gl.activeTexture(gl.TEXTURE0 + 2);
-        gl.bindTexture(gl.TEXTURE_2D, textures[2]);
+        this.bindTexture(textures[0], images[0], "u_image_elementIdx8", 0);
+        this.bindTexture(textures[1], images[1], "u_image_temperature32", 1);
+        this.bindTexture(textures[2], images[2], "u_image_mass32", 2);
 
         // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
         this.setFramebuffer(null, gl.canvas.width, gl.canvas.height);
@@ -254,6 +243,95 @@ void main() {
         gl.drawArrays(primitiveType, offset, count);
 
         console.log("Checking WebGL errors at the end of render():", gl.getError()); // TODO: more error reporting
+    }
+
+    setupShaders(vertexShaderSource, fragmentShaderSource) {
+        const gl = this.gl;
+    
+        // Compile shaders
+        const vertexShader = this.createShader(gl.VERTEX_SHADER, vertexShaderSource);
+        const fragmentShader = this.createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+        
+        // Link program
+        const program = this.createProgram(vertexShader, fragmentShader);
+    
+        return { program, vertexShader, fragmentShader };
+    }
+
+    setupPositionBuffer() {
+        const gl = this.gl;
+
+        // look up where the vertex data needs to go.
+        const positionAttributeLocation = gl.getAttribLocation(this.program, "a_position");
+        
+
+        // Create a buffer and put a single pixel space rectangle in
+        // it (2 triangles)
+        // Create a buffer and put three 2d clip space points in it
+        const positionBuffer = gl.createBuffer();
+
+        // Bind it to ARRAY_BUFFER (think of it as ARRAY_BUFFER = positionBuffer)
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        const positions = new Float32Array([
+            10, 20,
+            80, 20,
+            10, 30,
+            10, 30,
+            80, 20,
+            80, 30,
+        ]);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+        
+        // Create a vertex array object (attribute state)
+        const vao = gl.createVertexArray();
+
+        // and make it the one we're currently working with
+        gl.bindVertexArray(vao);
+
+        // Bind the attribute/buffer set we want.
+        gl.bindVertexArray(vao);
+
+        // Turn on the attribute
+        gl.enableVertexAttribArray(positionAttributeLocation);
+
+        // Tell the attribute how to get data out of positionBuffer (ARRAY_BUFFER)
+        var size = 2;          // 2 components per iteration
+        var type = gl.FLOAT;   // the data is 32bit floats
+        var normalize = false; // don't normalize the data
+        var stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
+        var offset = 0;        // start at the beginning of the buffer
+        gl.vertexAttribPointer(positionAttributeLocation, size, type, normalize, stride, offset);
+
+        return positionBuffer;
+    }
+
+    setupTextureBuffers() {
+        const gl = this.gl;
+
+        // look up where the vertex data needs to go.
+        const texCoordAttributeLocation = gl.getAttribLocation(this.program, "a_texCoord");
+        
+        const texCoordBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+        const positions = new Float32Array([
+            0.0,  0.0,
+            1.0,  0.0,
+            0.0,  1.0,
+            0.0,  1.0,
+            1.0,  0.0,
+            1.0,  1.0
+        ]);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(texCoordAttributeLocation);
+        const size = 2;          // 2 components per iteration
+        const type = gl.FLOAT;   // the data is 32bit floats
+        const normalize = false; // don't normalize the data
+        const stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
+        const offset = 0;        // start at the beginning of the buffer
+        gl.vertexAttribPointer(
+            texCoordAttributeLocation, size, type, normalize, stride, offset)
+
+        return texCoordBuffer;
     }
 
     setFramebuffer(fbo, width, height) {
@@ -286,6 +364,77 @@ void main() {
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
      
         return texture;
+    }
+
+    bindTexture(texture, image, glsl_location, texture_unit_location) {
+        const gl = this.gl;
+
+        if (typeof glsl_location !== "string") {
+            throw new Error("glsl_location must be a string.");
+        }
+
+        // Set the image location to use inside the shader's GLSL code
+        let u_image_location = gl.getUniformLocation(this.program, glsl_location);
+
+        // set which texture units to render with.
+        // Tell the shader to get the texture from texture unit 0, unit 1
+        gl.uniform1i(u_image_location, texture_unit_location);
+        
+        gl.activeTexture(gl.TEXTURE0 + texture_unit_location);
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+    }
+
+    createAndSetupTextureArray() { // TODO: mipmaps
+        const gl = this.gl;
+
+        var texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+     
+        // Set up texture so we can render any size image and so we are
+        // working with pixels (no mipmaps, no filtering, no repeating)
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+     
+        return texture;
+    }
+
+    bindTextureArray(textureArray, images, glsl_location, texture_unit_location) {
+        const gl = this.gl;
+
+        // TODO: type and bound checking
+       
+        let u_image_world_array_location = gl.getUniformLocation(this.program, glsl_location);
+
+        // Assume all images are the same size
+        let width = images[0].width;
+        let height = images[0].height;
+        let depth = images.length; // Number of images (array layers)
+        
+        // Allocate memory for the texture array (use texStorage3D for better performance)
+        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, width, height, depth);
+
+        // Upload each image as a separate layer in the array
+        for (let i = 0; i < depth; i++) {
+            gl.texSubImage3D(
+                gl.TEXTURE_2D_ARRAY,  // Target texture type
+                0,                    // Mipmap level
+                0, 0, i,              // x, y, z offsets (z = layer index)
+                width, height, 1,     // Width, height, depth (1 layer at a time)
+                gl.RGBA,              // Source format
+                gl.UNSIGNED_BYTE,     // Source type
+                images[i]             // Image data
+            );
+        }
+        // TODO: check if this implementation repeats code
+
+        // Bind the texture array to texture unit at texture_unit_location
+        gl.activeTexture(gl.TEXTURE0 + texture_unit_location);
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
+
+        // Bind texture array to texture unit 0
+        gl.uniform1i(u_image_array_location, 0);
     }
 
     createShader(type, source) {
@@ -339,6 +488,10 @@ void main() {
            x1, y2,
            x2, y1,
            x2, y2]), gl.STATIC_DRAW);
+    }
+
+    drawRectangles() {
+        // TODO
     }
   
     clearCanvas() {
