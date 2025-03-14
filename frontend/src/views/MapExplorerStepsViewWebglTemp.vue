@@ -2,6 +2,11 @@
     <div class="iframe-container">
       <iframe ref="iframeRef" :src="iframeUrl" frameborder="0" allow="clipboard-read; clipboard-write"></iframe>
     </div>
+    
+    <div>
+      <h1>Canvas Manager Example</h1>
+      <WebGL2Component />
+    </div>
   </template>
   
   <script setup>
@@ -10,6 +15,11 @@
   import { useRoute } from 'vue-router';
   
   import { useUserStore } from '@/stores';
+
+  import WebGL2Component from '@/components/WebGL2Component.vue';
+
+  const webglCanvas = ref(null);
+  const webglCanvas2 = ref(null);
   
   const route = useRoute();
   
