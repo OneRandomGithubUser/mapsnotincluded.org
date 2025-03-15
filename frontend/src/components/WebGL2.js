@@ -19,8 +19,55 @@ export default class WebGL2CanvasManager {
 
         this.resizeCanvas(images[0].width, images[0].height);
 
+        const vertexShaderSource = this.getVertexShaderGLSL();
+        const fragmentShaderSource = this.getFragmentShaderGLSL();
+
+        // Use our boilerplate utils to compile the shaders and link into a program
+        const shaders = this.setupShaders(vertexShaderSource, fragmentShaderSource);
+        this.program = shaders.program;
+        const vertexShader = shaders.vertexShader;
+        const fragmentShader = shaders.fragmentShader;
+
+        const positionBuffer = this.setupPositionBuffer();
+        const texCoordBuffer = this.setupTextureBuffers();
+
+        // provide texture coordinates for the rectangle.
+        
+        // TODO: gl.TEXTURE_2D_ARRAY
+        const { textures, framebuffers } = this.setupTextures(images);
+
+        // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
+
+        this.resetCanvasState();
+
+        // Tell it to use our program (pair of shaders)
+        gl.useProgram(this.program);
+
+        this.setupUniforms();
+
+        this.bindTexture(textures[0], images[0], "u_image_elementIdx8", 0);
+        this.bindTexture(textures[1], images[1], "u_image_temperature32", 1);
+        this.bindTexture(textures[2], images[2], "u_image_mass32", 2);
+
+        // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
+        this.setFramebuffer(null, gl.canvas.width, gl.canvas.height);
+      
+        
+        // Bind the position buffer so gl.bufferData that will be called
+        // in setRectangle puts data in the position buffer
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        
+        // Set a rectangle the same size as the image.
+        this.setRectangle(0, 0, images[0].width, images[0].height);
+
+        this.drawScene();
+
+        console.log("Checking WebGL errors at the end of render():", gl.getError()); // TODO: more error reporting
+    }
+
+    getVertexShaderGLSL() {
         // Create a vertex and fragment shader program, in GLSL
-        let vertexShaderSource = `#version 300 es
+        const vertexShaderSource = `#version 300 es
 
 // an attribute is an input (in) to a vertex shader.
 // It will receive data from a buffer
@@ -54,21 +101,24 @@ void main() {
     v_texCoord = a_texCoord;
 }
 `;
+        return vertexShaderSource;
+    }
 
-    let fragmentShaderSource = `#version 300 es
+    getFragmentShaderGLSL() {
+        const fragmentShaderSource = `#version 300 es
  
 // fragment shaders don't have a default precision so we need
 // to pick one. highp is a good default. It means "high precision"
 precision highp float;
- 
+
 // our texture
 uniform sampler2D u_image_elementIdx8;
 uniform sampler2D u_image_temperature32;
 uniform sampler2D u_image_mass32;
- 
+
 // the texCoords passed in from the vertex shader.
 in vec2 v_texCoord;
- 
+
 // we need to declare an output for the fragment shader
 out vec4 outColor;
 
@@ -127,8 +177,8 @@ vec4 floatToRGBA(float value) {
     for (int i = 0; i < numPoints - 1; i++) {
         if (value >= controlValues[i] && value <= controlValues[i + 1]) {
             vec3 interpolatedColor = interpolateColor(value, 
-                                                      controlValues[i], controlColors[i], 
-                                                      controlValues[i + 1], controlColors[i + 1]);
+                                                        controlValues[i], controlColors[i], 
+                                                        controlValues[i + 1], controlColors[i + 1]);
             return vec4(interpolatedColor, 1.0); // Alpha = 1
         }
     }
@@ -156,50 +206,7 @@ void main() {
     outColor = floatToRGBA(floatValue);
 }
 `;
-
-        // Use our boilerplate utils to compile the shaders and link into a program
-        const shaders = this.setupShaders(vertexShaderSource, fragmentShaderSource);
-        this.program = shaders.program;
-        this.vertexShader = shaders.vertexShader;
-        this.fragmentShader = shaders.fragmentShader;
-
-        const positionBuffer = this.setupPositionBuffer();
-        const texCoordBuffer = this.setupTextureBuffers();
-
-
-        // provide texture coordinates for the rectangle.
-        
-        
-        // TODO: gl.TEXTURE_2D_ARRAY
-        const { textures, framebuffers } = this.setupTextures(images);
-
-        // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
-
-        this.resetCanvasState();
-
-        // Tell it to use our program (pair of shaders)
-        gl.useProgram(this.program);
-
-        this.setupUniforms();
-
-        this.bindTexture(textures[0], images[0], "u_image_elementIdx8", 0);
-        this.bindTexture(textures[1], images[1], "u_image_temperature32", 1);
-        this.bindTexture(textures[2], images[2], "u_image_mass32", 2);
-
-        // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
-        this.setFramebuffer(null, gl.canvas.width, gl.canvas.height);
-      
-        
-        // Bind the position buffer so gl.bufferData that will be called
-        // in setRectangle puts data in the position buffer
-        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-        
-        // Set a rectangle the same size as the image.
-        this.setRectangle(0, 0, images[0].width, images[0].height);
-
-        this.drawScene();
-
-        console.log("Checking WebGL errors at the end of render():", gl.getError()); // TODO: more error reporting
+        return fragmentShaderSource;
     }
 
     resetCanvasState() {
@@ -457,8 +464,8 @@ void main() {
         gl.activeTexture(gl.TEXTURE0 + texture_unit_location);
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
 
-        // Bind texture array to texture unit 0
-        gl.uniform1i(u_image_array_location, 0);
+        // Bind texture array to texture unit at texture_unit_location
+        gl.uniform1i(u_image_world_array_location, texture_unit_location);
     }
 
     createShader(type, source) {
