@@ -33,8 +33,8 @@ export default class WebGL2CanvasManager {
 
         // provide texture coordinates for the rectangle.
         
-        // TODO: gl.TEXTURE_2D_ARRAY
         const { textures, framebuffers } = this.setupTextures(images);
+        const textureArray = this.setupTextureArray(images);
 
         // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
 
@@ -45,9 +45,11 @@ export default class WebGL2CanvasManager {
 
         this.setupUniforms();
 
-        this.bindTexture(textures[0], images[0], "u_image_elementIdx8", 0);
-        this.bindTexture(textures[1], images[1], "u_image_temperature32", 1);
-        this.bindTexture(textures[2], images[2], "u_image_mass32", 2);
+        this.bindTextureToUnit(textures[0], images[0], "u_image_elementIdx8", 0);
+        this.bindTextureToUnit(textures[1], images[1], "u_image_temperature32", 1);
+        this.bindTextureToUnit(textures[2], images[2], "u_image_mass32", 2);
+
+        this.bindTextureArrayToUnit(textureArray, images, "u_image_array", 3);
 
         // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
         this.setFramebuffer(null, gl.canvas.width, gl.canvas.height);
@@ -115,6 +117,9 @@ precision highp float;
 uniform sampler2D u_image_elementIdx8;
 uniform sampler2D u_image_temperature32;
 uniform sampler2D u_image_mass32;
+
+precision highp sampler2DArray;
+uniform sampler2DArray u_image_array;
 
 // the texCoords passed in from the vertex shader.
 in vec2 v_texCoord;
@@ -194,7 +199,7 @@ vec4 floatToRGBA(float value) {
 
 void main() {
     // Look up a color from the texture.
-    vec4 color = texture(u_image_elementIdx8, v_texCoord);
+    vec4 color = texture(u_image_array, vec3(v_texCoord, 0)); // Layer 0 = elementIdx8
     vec4 temperature_rgba = texture(u_image_temperature32, v_texCoord);
     vec4 downPixelColor = texture_displacement_in_pixels(u_image_elementIdx8, v_texCoord, vec2pixels(vec2(0, -1)));
 
@@ -203,7 +208,8 @@ void main() {
 
     // outColor = vec4((color.rgb + downPixelColor.rgb)/2.0, 1);
     // outColor = vec4(color.rgb, 1);
-    outColor = floatToRGBA(floatValue);
+    // outColor = floatToRGBA(floatValue);
+    outColor = (  vec4(color.rgb, 1) + vec4(floatToRGBA(floatValue).rgb, 1)   ) / 2.0;
 }
 `;
         return fragmentShaderSource;
@@ -319,42 +325,6 @@ void main() {
         return texCoordBuffer;
     }
 
-    setupTextures(images) {
-        const gl = this.gl;
-
-        // create 2 textures
-        const textures = [];
-        const framebuffers = [];
-        
-        for (let ii = 0; ii < images.length; ++ii) {
-            const texture = this.createAndSetupTexture();
-            textures.push(texture);
-            
-            // Upload the image into the texture.
-            const mipLevel = 0;               // the largest mip
-            const internalFormat = gl.RGBA;   // format we want in the texture
-            const srcFormat = gl.RGBA;        // format of data we are supplying
-            const srcType = gl.UNSIGNED_BYTE  // type of data we are supplying
-            gl.texImage2D(gl.TEXTURE_2D,
-                            mipLevel,
-                            internalFormat,
-                            srcFormat,
-                            srcType,
-                            images[ii]);
- 
-            // Create a framebuffer
-            const fbo = gl.createFramebuffer();
-            framebuffers.push(fbo);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-            
-            // Attach a texture to it.
-            const attachmentPoint = gl.COLOR_ATTACHMENT0;
-            gl.framebufferTexture2D(
-                gl.FRAMEBUFFER, attachmentPoint, gl.TEXTURE_2D, texture, mipLevel);
-        }
-        return { textures, framebuffers };
-    }
-
     setupUniforms() {
         const gl = this.gl;
 
@@ -397,7 +367,43 @@ void main() {
         return texture;
     }
 
-    bindTexture(texture, image, glsl_location, texture_unit_location) {
+    setupTextures(images) {
+        const gl = this.gl;
+
+        // create 2 textures
+        const textures = [];
+        const framebuffers = [];
+        
+        for (let ii = 0; ii < images.length; ++ii) {
+            const texture = this.createAndSetupTexture();
+            textures.push(texture);
+            
+            // Upload the image into the texture.
+            const mipLevel = 0;               // the largest mip
+            const internalFormat = gl.RGBA;   // format we want in the texture
+            const srcFormat = gl.RGBA;        // format of data we are supplying
+            const srcType = gl.UNSIGNED_BYTE  // type of data we are supplying
+            gl.texImage2D(gl.TEXTURE_2D,
+                            mipLevel,
+                            internalFormat,
+                            srcFormat,
+                            srcType,
+                            images[ii]);
+ 
+            // Create a framebuffer
+            const fbo = gl.createFramebuffer();
+            framebuffers.push(fbo);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+            
+            // Attach a texture to it.
+            const attachmentPoint = gl.COLOR_ATTACHMENT0;
+            gl.framebufferTexture2D(
+                gl.FRAMEBUFFER, attachmentPoint, gl.TEXTURE_2D, texture, mipLevel);
+        }
+        return { textures, framebuffers };
+    }
+
+    bindTextureToUnit(texture, image, glsl_location, texture_unit_location) {
         const gl = this.gl;
 
         if (typeof glsl_location !== "string") {
@@ -419,7 +425,7 @@ void main() {
         const gl = this.gl;
 
         const texture = gl.createTexture();
-        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
      
         // Set up texture so we can render any size image and so we are
         // working with pixels (no mipmaps, no filtering, no repeating)
@@ -431,34 +437,65 @@ void main() {
         return texture;
     }
 
-    bindTextureArray(textureArray, images, glsl_location, texture_unit_location) {
+    allocateTextureArrayStorage(textureArray, images) {
+        const gl = this.gl;
+
+        // Bind the texture array before allocating storage
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
+    
+        // Get dimensions (assuming all images are the same size)
+        const width = images[0].width;
+        const height = images[0].height;
+        const depth = images.length; // Number of layers
+    
+        // Allocate immutable storage for a 3D texture (TEXTURE_2D_ARRAY)
+        gl.texStorage3D(
+            gl.TEXTURE_2D_ARRAY, // Specifies the texture type
+            1,                   // Number of mipmap levels (1 = no mipmaps)
+            gl.RGBA8,            // Internal storage format (8-bit RGBA per channel)
+            width, height, depth // Texture dimensions and depth (number of layers)
+        );
+    }
+
+    uploadTextureArray(textureArray, images) {
+        const gl = this.gl;
+
+        // Get dimensions (assuming all images are the same size)
+        const width = images[0].width;
+        const height = images[0].height;
+        const depth = images.length; // Number of layers
+
+        // Bind the texture array before uploading
+        gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
+        
+        // Upload each image as a separate layer in the texture array
+        for (let i = 0; i < depth; i++) {
+            gl.texSubImage3D(
+                gl.TEXTURE_2D_ARRAY,    // Target texture type
+                0,                      // Mipmap level
+                0, 0, i,                // x, y, z offsets (0 = no offset, z = layer index)
+                width, height, 1,       // Width, height, depth (1 layer at a time)
+                gl.RGBA,                // Source format
+                gl.UNSIGNED_BYTE,       // Source type
+                images[i]               // Image data
+            );
+        }
+    }
+
+    setupTextureArray(images) {
+        // Create and setup a texture array
+        const textureArray = this.createAndSetupTextureArray();
+        this.allocateTextureArrayStorage(textureArray, images);
+        this.uploadTextureArray(textureArray, images);
+        return textureArray;
+    }
+
+    bindTextureArrayToUnit(textureArray, images, glsl_location, texture_unit_location) {
         const gl = this.gl;
 
         // TODO: type and bound checking
        
         const u_image_world_array_location = gl.getUniformLocation(this.program, glsl_location);
-
-        // Assume all images are the same size
-        const width = images[0].width;
-        const height = images[0].height;
-        const depth = images.length; // Number of images (array layers)
-        
-        // Allocate memory for the texture array (use texStorage3D for better performance)
-        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, width, height, depth);
-
-        // Upload each image as a separate layer in the array
-        for (let i = 0; i < depth; i++) {
-            gl.texSubImage3D(
-                gl.TEXTURE_2D_ARRAY,  // Target texture type
-                0,                    // Mipmap level
-                0, 0, i,              // x, y, z offsets (z = layer index)
-                width, height, 1,     // Width, height, depth (1 layer at a time)
-                gl.RGBA,              // Source format
-                gl.UNSIGNED_BYTE,     // Source type
-                images[i]             // Image data
-            );
-        }
-        // TODO: check if this implementation repeats code
 
         // Bind the texture array to texture unit at texture_unit_location
         gl.activeTexture(gl.TEXTURE0 + texture_unit_location);
