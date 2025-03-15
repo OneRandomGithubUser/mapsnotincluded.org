@@ -49,7 +49,7 @@ export default class WebGL2CanvasManager {
         this.bindTextureToUnit(textures[1], images[1], "u_image_temperature32", 1);
         this.bindTextureToUnit(textures[2], images[2], "u_image_mass32", 2);
 
-        this.bindTextureArrayToUnit(textureArray, images, "u_image_array", 3);
+        this.bindTextureArrayToUnit(textureArray, "u_image_array", 3);
 
         // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
         this.setFramebuffer(null, gl.canvas.width, gl.canvas.height);
@@ -457,19 +457,49 @@ void main() {
         );
     }
 
-    uploadTextureArray(textureArray, images) {
+    getImageFromAtlas(imageAtlas, layerIndex, getBoundsForLayer) {
+        // Use the function to get bounds if an atlas is used
+        const bounds = getBoundsForLayer(i);
+        const sx = bounds.x;
+        const sy = bounds.y;
+        const sw = bounds.width;
+        const sh = bounds.height;
+
+        // Create a temporary canvas to extract the subregion
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = sw;
+        tempCanvas.height = sh;
+        const ctx = tempCanvas.getContext("2d");
+
+        // Draw the subregion onto the temporary canvas
+        ctx.drawImage(images, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        // Update sourceImage to be the extracted subregion
+        sourceImage = tempCanvas;
+
+        return { sourceImage, sw, sh };
+    }
+
+    getImageFromImageArray(imageArray, layerIndex) {
+        const sourceImage = imageArray[layerIndex];
+        const width = sourceImage.width;
+        const height = sourceImage.height;
+        return { sourceImage, width, height };
+    }
+
+    uploadTextureArray(textureArray, imageArrayOrAtlas, getBoundsForLayer = null) {
         const gl = this.gl;
 
-        // Get dimensions (assuming all images are the same size)
-        const width = images[0].width;
-        const height = images[0].height;
-        const depth = images.length; // Number of layers
+        const isAtlas = typeof imageArrayOrAtlas === "object" && !Array.isArray(imageArrayOrAtlas); // Check if it's a single atlas image
+        const depth = isAtlas ? getBoundsForLayer.length : imageArrayOrAtlas.length; // Number of layers
 
         // Bind the texture array before uploading
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
         
         // Upload each image as a separate layer in the texture array
         for (let i = 0; i < depth; i++) {
+            const { sourceImage, width, height } = isAtlas ? this.getImageFromAtlas(imageArrayOrAtlas, i) : this.getImageFromImageArray(imageArrayOrAtlas, i);
+
             gl.texSubImage3D(
                 gl.TEXTURE_2D_ARRAY,    // Target texture type
                 0,                      // Mipmap level
@@ -477,7 +507,7 @@ void main() {
                 width, height, 1,       // Width, height, depth (1 layer at a time)
                 gl.RGBA,                // Source format
                 gl.UNSIGNED_BYTE,       // Source type
-                images[i]               // Image data
+                sourceImage               // Image data
             );
         }
     }
@@ -490,7 +520,7 @@ void main() {
         return textureArray;
     }
 
-    bindTextureArrayToUnit(textureArray, images, glsl_location, texture_unit_location) {
+    bindTextureArrayToUnit(textureArray,  glsl_location, texture_unit_location) {
         const gl = this.gl;
 
         // TODO: type and bound checking
