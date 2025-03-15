@@ -33,8 +33,15 @@ export default class WebGL2CanvasManager {
 
         // provide texture coordinates for the rectangle.
         
-        const { textures, framebuffers } = this.setupTextures(images);
-        const textureArray = this.setupTextureArray(images);
+        const worldDataImages = images.slice(0, 3);
+        const { textures: worldDataTextures, framebuffers } = this.setupTextures(worldDataImages);
+        const worldEtmTextureArray = this.setupTextureArray(worldDataImages, null, null);
+
+        const uiOverlayImageAtlas = images[3]; // TODO: keep style consistent
+        const getAtlasBounds = (layerIndex) => {
+            return { x: layerIndex, y: 0, width: 1, height: 1 };
+        };
+        const uiOverlayTextureArray = this.setupTextureArray(uiOverlayImageAtlas, getAtlasBounds, uiOverlayImageAtlas.width); // NOTE: assumption that the uiOverlayImageAtlas is a horizontal strip of 1x1 images
 
         // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
 
@@ -45,11 +52,12 @@ export default class WebGL2CanvasManager {
 
         this.setupUniforms();
 
-        this.bindTextureToUnit(textures[0], images[0], "u_image_elementIdx8", 0);
-        this.bindTextureToUnit(textures[1], images[1], "u_image_temperature32", 1);
-        this.bindTextureToUnit(textures[2], images[2], "u_image_mass32", 2);
+        this.bindTextureToUnit(worldDataTextures[0], images[0], "u_world_data_image_elementIdx8", 0);
+        this.bindTextureToUnit(worldDataTextures[1], images[1], "u_world_data_image_temperature32", 1);
+        this.bindTextureToUnit(worldDataTextures[2], images[2], "u_world_data_image_mass32", 2);
 
-        this.bindTextureArrayToUnit(textureArray, "u_image_array", 3);
+        this.bindTextureArrayToUnit(worldEtmTextureArray, "u_world_data_image_array", 3);
+        this.bindTextureArrayToUnit(uiOverlayTextureArray, "u_ui_overlay_image_array", 4);
 
         // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
         this.setFramebuffer(null, gl.canvas.width, gl.canvas.height);
@@ -114,12 +122,13 @@ void main() {
 precision highp float;
 
 // our texture
-uniform sampler2D u_image_elementIdx8;
-uniform sampler2D u_image_temperature32;
-uniform sampler2D u_image_mass32;
+uniform sampler2D u_world_data_image_elementIdx8;
+uniform sampler2D u_world_data_image_temperature32;
+uniform sampler2D u_world_data_image_mass32;
 
 precision highp sampler2DArray;
-uniform sampler2DArray u_image_array;
+uniform sampler2DArray u_world_data_image_array;
+uniform sampler2DArray u_ui_overlay_image_array;
 
 // the texCoords passed in from the vertex shader.
 in vec2 v_texCoord;
@@ -199,9 +208,12 @@ vec4 floatToRGBA(float value) {
 
 void main() {
     // Look up a color from the texture.
-    vec4 color = texture(u_image_array, vec3(v_texCoord, 0)); // Layer 0 = elementIdx8
-    vec4 temperature_rgba = texture(u_image_temperature32, v_texCoord);
-    vec4 downPixelColor = texture_displacement_in_pixels(u_image_elementIdx8, v_texCoord, vec2pixels(vec2(0, -1)));
+    vec4 color = texture(u_world_data_image_array, vec3(v_texCoord, 0)); // Layer 0 = elementIdx8
+    // The color is a grayscale value representing the element index, which we can just use the red channel for
+    uint elementIdx = uint(color.r * 255.0);
+    vec4 temperature_rgba = texture(u_world_data_image_temperature32, v_texCoord);
+    vec4 downPixelColor = texture_displacement_in_pixels(u_world_data_image_elementIdx8, v_texCoord, vec2pixels(vec2(0, -1)));
+    vec4 uiOverlayColor = texture(u_ui_overlay_image_array, vec3(v_texCoord, elementIdx));
 
     // Decode the RGBA color as a single 32-bit float
     float floatValue = decodeRGBAtoFloat(temperature_rgba);
@@ -209,7 +221,8 @@ void main() {
     // outColor = vec4((color.rgb + downPixelColor.rgb)/2.0, 1);
     // outColor = vec4(color.rgb, 1);
     // outColor = floatToRGBA(floatValue);
-    outColor = (  vec4(color.rgb, 1) + vec4(floatToRGBA(floatValue).rgb, 1)   ) / 2.0;
+    outColor = vec4(uiOverlayColor.rgb, 1);
+    // outColor = (  vec4(uiOverlayColor.rgb, 1) + vec4(floatToRGBA(floatValue).rgb, 1)   ) / 2.0;
 }
 `;
         return fragmentShaderSource;
@@ -437,16 +450,17 @@ void main() {
         return texture;
     }
 
-    allocateTextureArrayStorage(textureArray, images) {
+    allocateTextureArrayStorage(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength) {
         const gl = this.gl;
+
+        const isAtlas = getAtlasBoundsForLayer !== null; // Check if it's a single atlas image
 
         // Bind the texture array before allocating storage
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
     
-        // Get dimensions (assuming all images are the same size)
-        const width = images[0].width;
-        const height = images[0].height;
-        const depth = images.length; // Number of layers
+        const width     = isAtlas ? getAtlasBoundsForLayer(0).width     : imageArrayOrAtlas[0].width;
+        const height    = isAtlas ? getAtlasBoundsForLayer(0).height    : imageArrayOrAtlas[0].height;
+        const depth     = isAtlas ? atlasLength                         : imageArrayOrAtlas.length; // Number of layers
     
         // Allocate immutable storage for a 3D texture (TEXTURE_2D_ARRAY)
         gl.texStorage3D(
@@ -457,9 +471,9 @@ void main() {
         );
     }
 
-    getImageFromAtlas(imageAtlas, layerIndex, getBoundsForLayer) {
+    getImageFromAtlas(imageAtlas, layerIndex, getAtlasBoundsForLayer) {
         // Use the function to get bounds if an atlas is used
-        const bounds = getBoundsForLayer(i);
+        const bounds = getAtlasBoundsForLayer(layerIndex);
         const sx = bounds.x;
         const sy = bounds.y;
         const sw = bounds.width;
@@ -472,12 +486,14 @@ void main() {
         const ctx = tempCanvas.getContext("2d");
 
         // Draw the subregion onto the temporary canvas
-        ctx.drawImage(images, sx, sy, sw, sh, 0, 0, sw, sh);
+        ctx.drawImage(imageAtlas, sx, sy, sw, sh, 0, 0, sw, sh);
 
         // Update sourceImage to be the extracted subregion
-        sourceImage = tempCanvas;
+        const sourceImage = tempCanvas;
+        const width = sw;
+        const height = sh;
 
-        return { sourceImage, sw, sh };
+        return { sourceImage, width, height };
     }
 
     getImageFromImageArray(imageArray, layerIndex) {
@@ -487,18 +503,22 @@ void main() {
         return { sourceImage, width, height };
     }
 
-    uploadTextureArray(textureArray, imageArrayOrAtlas, getBoundsForLayer = null) {
+    uploadTextureArray(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength) {
         const gl = this.gl;
 
-        const isAtlas = typeof imageArrayOrAtlas === "object" && !Array.isArray(imageArrayOrAtlas); // Check if it's a single atlas image
-        const depth = isAtlas ? getBoundsForLayer.length : imageArrayOrAtlas.length; // Number of layers
+        const isAtlas = getAtlasBoundsForLayer !== null; // Check if it's a single atlas image
+        const depth = isAtlas ? atlasLength : imageArrayOrAtlas.length; // Number of layers
 
         // Bind the texture array before uploading
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
         
         // Upload each image as a separate layer in the texture array
         for (let i = 0; i < depth; i++) {
-            const { sourceImage, width, height } = isAtlas ? this.getImageFromAtlas(imageArrayOrAtlas, i) : this.getImageFromImageArray(imageArrayOrAtlas, i);
+            const { sourceImage, width, height } = isAtlas ? this.getImageFromAtlas(imageArrayOrAtlas, i, getAtlasBoundsForLayer)
+                                                           : this.getImageFromImageArray(imageArrayOrAtlas, i);
+            if (isAtlas) {
+                console.log("Uploading atlas image to layer", i, "of", sourceImage.toDataURL());
+            }
 
             gl.texSubImage3D(
                 gl.TEXTURE_2D_ARRAY,    // Target texture type
@@ -512,11 +532,11 @@ void main() {
         }
     }
 
-    setupTextureArray(images) {
+    setupTextureArray(imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength) {
         // Create and setup a texture array
         const textureArray = this.createAndSetupTextureArray();
-        this.allocateTextureArrayStorage(textureArray, images);
-        this.uploadTextureArray(textureArray, images);
+        this.allocateTextureArrayStorage(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength);
+        this.uploadTextureArray(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength);
         return textureArray;
     }
 

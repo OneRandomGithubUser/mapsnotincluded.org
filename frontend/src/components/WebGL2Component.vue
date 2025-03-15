@@ -49,6 +49,7 @@
                 "/elementIdx8.png",
                 "/temperature32.png",
                 "/mass32.png",
+                "/ui_1x1.png",
             ], (images) => canvas_manager.render(images, getRandomInt(200, 300), getRandomInt(200, 300), getRandomInt(0, 200), getRandomInt(0, 200)));
           //canvases.value[id].setRectangle(50, 50, 100, 100);
         }
