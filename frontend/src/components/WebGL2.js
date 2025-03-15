@@ -170,56 +170,17 @@ void main() {
         // provide texture coordinates for the rectangle.
         
         
-        // create 2 textures
-        var textures = [];
-        var framebuffers = [];
         // TODO: gl.TEXTURE_2D_ARRAY
-        
-        for (var ii = 0; ii < images.length; ++ii) {
-            var texture = this.createAndSetupTexture();
-            textures.push(texture);
-            
-            // Upload the image into the texture.
-            var mipLevel = 0;               // the largest mip
-            var internalFormat = gl.RGBA;   // format we want in the texture
-            var srcFormat = gl.RGBA;        // format of data we are supplying
-            var srcType = gl.UNSIGNED_BYTE  // type of data we are supplying
-            gl.texImage2D(gl.TEXTURE_2D,
-                            mipLevel,
-                            internalFormat,
-                            srcFormat,
-                            srcType,
-                            images[ii]);
- 
-            // Create a framebuffer
-            var fbo = gl.createFramebuffer();
-            framebuffers.push(fbo);
-            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-            
-            // Attach a texture to it.
-            var attachmentPoint = gl.COLOR_ATTACHMENT0;
-            gl.framebufferTexture2D(
-                gl.FRAMEBUFFER, attachmentPoint, gl.TEXTURE_2D, texture, mipLevel);
-        }
+        const { textures, framebuffers } = this.setupTextures(images);
 
         // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
 
-        // Tell WebGL how to convert from clip space to pixels
-        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-
-        // Clear the canvas
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+        this.resetCanvasState();
 
         // Tell it to use our program (pair of shaders)
         gl.useProgram(this.program);
 
-        // look up uniform locations
-        this.resolutionUniformLocation = gl.getUniformLocation(this.program, "u_resolution");
-        
-        // Pass in the canvas resolution so we can convert from
-        // pixels to clip space in the shader
-        gl.uniform2f(this.resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+        this.setupUniforms();
 
         this.bindTexture(textures[0], images[0], "u_image_elementIdx8", 0);
         this.bindTexture(textures[1], images[1], "u_image_temperature32", 1);
@@ -235,14 +196,31 @@ void main() {
         
         // Set a rectangle the same size as the image.
         this.setRectangle(0, 0, images[0].width, images[0].height);
-        
-        // draw
-        var primitiveType = gl.TRIANGLES;
-        var offset = 0;
-        var count = 6;
-        gl.drawArrays(primitiveType, offset, count);
+
+        this.drawScene();
 
         console.log("Checking WebGL errors at the end of render():", gl.getError()); // TODO: more error reporting
+    }
+
+    resetCanvasState() {
+        const gl = this.gl;
+
+        // Tell WebGL how to convert from clip space to pixels
+        gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
+
+        // Clear the canvas
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    }
+
+    drawScene() {
+        const gl = this.gl;
+
+        // draw
+        const primitiveType = gl.TRIANGLES;
+        const offset = 0;
+        const count = 6;
+        gl.drawArrays(primitiveType, offset, count);
     }
 
     setupShaders(vertexShaderSource, fragmentShaderSource) {
@@ -295,11 +273,11 @@ void main() {
         gl.enableVertexAttribArray(positionAttributeLocation);
 
         // Tell the attribute how to get data out of positionBuffer (ARRAY_BUFFER)
-        var size = 2;          // 2 components per iteration
-        var type = gl.FLOAT;   // the data is 32bit floats
-        var normalize = false; // don't normalize the data
-        var stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
-        var offset = 0;        // start at the beginning of the buffer
+        const size = 2;          // 2 components per iteration
+        const type = gl.FLOAT;   // the data is 32bit floats
+        const normalize = false; // don't normalize the data
+        const stride = 0;        // 0 = move forward size * sizeof(type) each iteration to get the next position
+        const offset = 0;        // start at the beginning of the buffer
         gl.vertexAttribPointer(positionAttributeLocation, size, type, normalize, stride, offset);
 
         return positionBuffer;
@@ -334,6 +312,52 @@ void main() {
         return texCoordBuffer;
     }
 
+    setupTextures(images) {
+        const gl = this.gl;
+
+        // create 2 textures
+        const textures = [];
+        const framebuffers = [];
+        
+        for (let ii = 0; ii < images.length; ++ii) {
+            const texture = this.createAndSetupTexture();
+            textures.push(texture);
+            
+            // Upload the image into the texture.
+            const mipLevel = 0;               // the largest mip
+            const internalFormat = gl.RGBA;   // format we want in the texture
+            const srcFormat = gl.RGBA;        // format of data we are supplying
+            const srcType = gl.UNSIGNED_BYTE  // type of data we are supplying
+            gl.texImage2D(gl.TEXTURE_2D,
+                            mipLevel,
+                            internalFormat,
+                            srcFormat,
+                            srcType,
+                            images[ii]);
+ 
+            // Create a framebuffer
+            const fbo = gl.createFramebuffer();
+            framebuffers.push(fbo);
+            gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+            
+            // Attach a texture to it.
+            const attachmentPoint = gl.COLOR_ATTACHMENT0;
+            gl.framebufferTexture2D(
+                gl.FRAMEBUFFER, attachmentPoint, gl.TEXTURE_2D, texture, mipLevel);
+        }
+        return { textures, framebuffers };
+    }
+
+    setupUniforms() {
+        const gl = this.gl;
+
+        // look up uniform locations
+        this.resolutionUniformLocation = gl.getUniformLocation(this.program, "u_resolution");
+    
+        // Pass in the canvas resolution so we can convert from pixels to clip space in the shader
+        gl.uniform2f(this.resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
+    }    
+
     setFramebuffer(fbo, width, height) {
         const gl = this.gl;
         const resolutionLocation = this.resolutionLocation;
@@ -351,7 +375,7 @@ void main() {
     createAndSetupTexture() {
         const gl = this.gl;
 
-        var texture = gl.createTexture();
+        const texture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, texture);
      
         // Set up texture so we can render any size image and so we are
@@ -374,7 +398,7 @@ void main() {
         }
 
         // Set the image location to use inside the shader's GLSL code
-        let u_image_location = gl.getUniformLocation(this.program, glsl_location);
+        const u_image_location = gl.getUniformLocation(this.program, glsl_location);
 
         // set which texture units to render with.
         // Tell the shader to get the texture from texture unit 0, unit 1
@@ -387,7 +411,7 @@ void main() {
     createAndSetupTextureArray() { // TODO: mipmaps
         const gl = this.gl;
 
-        var texture = gl.createTexture();
+        const texture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D, texture);
      
         // Set up texture so we can render any size image and so we are
@@ -405,12 +429,12 @@ void main() {
 
         // TODO: type and bound checking
        
-        let u_image_world_array_location = gl.getUniformLocation(this.program, glsl_location);
+        const u_image_world_array_location = gl.getUniformLocation(this.program, glsl_location);
 
         // Assume all images are the same size
-        let width = images[0].width;
-        let height = images[0].height;
-        let depth = images.length; // Number of images (array layers)
+        const width = images[0].width;
+        const height = images[0].height;
+        const depth = images.length; // Number of images (array layers)
         
         // Allocate memory for the texture array (use texStorage3D for better performance)
         gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, width, height, depth);
@@ -440,10 +464,10 @@ void main() {
     createShader(type, source) {
         const gl = this.gl;
 
-        var shader = gl.createShader(type);
+        const shader = gl.createShader(type);
         gl.shaderSource(shader, source);
         gl.compileShader(shader);
-        var success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
+        const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
         if (success) {
           return shader;
         }
@@ -455,11 +479,11 @@ void main() {
     createProgram(vertexShader, fragmentShader) {
         const gl = this.gl;
 
-        var program = gl.createProgram();
+        const program = gl.createProgram();
         gl.attachShader(program, vertexShader);
         gl.attachShader(program, fragmentShader);
         gl.linkProgram(program);
-        var success = gl.getProgramParameter(program, gl.LINK_STATUS);
+        const success = gl.getProgramParameter(program, gl.LINK_STATUS);
         if (success) {
           return program;
         }
@@ -471,10 +495,10 @@ void main() {
     setRectangle(x, y, width, height) {
         const gl = this.gl;
 
-        var x1 = x;
-        var x2 = x + width;
-        var y1 = y;
-        var y2 = y + height;
+        const x1 = x;
+        const x2 = x + width;
+        const y1 = y;
+        const y2 = y + height;
        
         // NOTE: gl.bufferData(gl.ARRAY_BUFFER, ...) will affect
         // whatever buffer is bound to the `ARRAY_BUFFER` bind point
