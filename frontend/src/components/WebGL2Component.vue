@@ -45,12 +45,17 @@
 
             // call loadImages with random values for width, height, x, y
 
+            const NATURAL_TILES_TEXTURE_SIZE = 1024;
+
+            const width = getRandomInt(50000, 100000);
+
             loadImages([
                 "/elementIdx8.png",
                 "/temperature32.png",
                 "/mass32.png",
-                "/ui_1x1.png",
-            ], (images) => canvas_manager.render(images, getRandomInt(200, 300), getRandomInt(200, 300), getRandomInt(0, 200), getRandomInt(0, 200)));
+                "/element_data_1x1.png",
+                `/tiles_mipmaps/${NATURAL_TILES_TEXTURE_SIZE}x${NATURAL_TILES_TEXTURE_SIZE}.png`
+            ], (images) => canvas_manager.render(images, width, width, getRandomInt(-2000, -3000), getRandomInt(-2000, -3000)));
           //canvases.value[id].setRectangle(50, 50, 100, 100);
         }
       };

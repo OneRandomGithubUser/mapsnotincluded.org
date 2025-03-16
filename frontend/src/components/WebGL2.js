@@ -35,13 +35,22 @@ export default class WebGL2CanvasManager {
         
         const worldDataImages = images.slice(0, 3);
         const { textures: worldDataTextures, framebuffers } = this.setupTextures(worldDataImages);
-        const worldEtmTextureArray = this.setupTextureArray(worldDataImages, null, null);
+        const worldEtmTextureArray = this.setupTextureArray(worldDataImages, null, null, true);
 
-        const uiOverlayImageAtlas = images[3]; // TODO: keep style consistent
-        const getAtlasBounds = (layerIndex) => {
-            return { x: layerIndex, y: 0, width: 1, height: 1 };
+        const elementDataImageAtlas = images[3]; // TODO: keep style consistent
+        const getElementDataAtlasBounds = (layerIndex) => {
+            return { x: layerIndex, y: 0, width: 1, height: 2 };
         };
-        const uiOverlayTextureArray = this.setupTextureArray(uiOverlayImageAtlas, getAtlasBounds, uiOverlayImageAtlas.width); // NOTE: assumption that the uiOverlayImageAtlas is a horizontal strip of 1x1 images
+        const elementDataTextureArray = this.setupTextureArray(elementDataImageAtlas, getElementDataAtlasBounds, elementDataImageAtlas.width, true);
+        // NOTE: assumption that the elementDataImageAtlas is a horizontal strip of 1x1 images. row 1 is the ui overlay color, row 2 is the element texture index (0-255, or invisible if there is none)
+        // TODO: does this need to be a texture array?
+
+        const naturalTilesImageAtlas = images[4];
+        const NATURAL_TILES_TEXTURE_SIZE = 1024;
+        const getNaturalTileAtlasBounds = (layerIndex) => {
+            return { x: layerIndex * NATURAL_TILES_TEXTURE_SIZE, y: 0, width: NATURAL_TILES_TEXTURE_SIZE, height: NATURAL_TILES_TEXTURE_SIZE };
+        };
+        const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlas, getNaturalTileAtlasBounds, naturalTilesImageAtlas.width/NATURAL_TILES_TEXTURE_SIZE, true);
 
         // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
 
@@ -57,7 +66,8 @@ export default class WebGL2CanvasManager {
         this.bindTextureToUnit(worldDataTextures[2], images[2], "u_world_data_image_mass32", 2);
 
         this.bindTextureArrayToUnit(worldEtmTextureArray, "u_world_data_image_array", 3);
-        this.bindTextureArrayToUnit(uiOverlayTextureArray, "u_ui_overlay_image_array", 4);
+        this.bindTextureArrayToUnit(elementDataTextureArray, "u_element_data_image_array", 4);
+        this.bindTextureArrayToUnit(naturalTilesTextureArray, "u_natural_tile_image_array", 5);
 
         // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
         this.setFramebuffer(null, gl.canvas.width, gl.canvas.height);
@@ -68,7 +78,9 @@ export default class WebGL2CanvasManager {
         gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
         
         // Set a rectangle the same size as the image.
-        this.setRectangle(0, 0, images[0].width, images[0].height);
+        //this.setRectangle(0, 0, images[0].width * 2, images[0].height * 2);
+        //this.setRectangle(0, 0, images[0].width, images[0].height);
+        this.setRectangle(left_edge_x, bottom_edge_y, width, height); // TODO
 
         this.drawScene();
 
@@ -128,7 +140,8 @@ uniform sampler2D u_world_data_image_mass32;
 
 precision highp sampler2DArray;
 uniform sampler2DArray u_world_data_image_array;
-uniform sampler2DArray u_ui_overlay_image_array;
+uniform sampler2DArray u_element_data_image_array;
+uniform sampler2DArray u_natural_tile_image_array;
 
 // the texCoords passed in from the vertex shader.
 in vec2 v_texCoord;
@@ -209,19 +222,37 @@ vec4 floatToRGBA(float value) {
 void main() {
     // Look up a color from the texture.
     vec4 color = texture(u_world_data_image_array, vec3(v_texCoord, 0)); // Layer 0 = elementIdx8
-    // The color is a grayscale value representing the element index, which we can just use the red channel for
+    // The color is a grayscale value representing the element index, which we can just use the red channel for // NOTE: assumes grayscale
     uint elementIdx = uint(color.r * 255.0);
     vec4 temperature_rgba = texture(u_world_data_image_temperature32, v_texCoord);
     vec4 downPixelColor = texture_displacement_in_pixels(u_world_data_image_elementIdx8, v_texCoord, vec2pixels(vec2(0, -1)));
-    vec4 uiOverlayColor = texture(u_ui_overlay_image_array, vec3(v_texCoord, elementIdx));
+    vec4 uiOverlayColor = texture(u_element_data_image_array, vec3(0, 0, elementIdx));
 
+
+    vec4 naturalTileDataColor = texture(u_element_data_image_array, vec3(0, 1, elementIdx));
+    // This represents an index that is used to look up the texture in the natural tile texture atlas, unless it is invisible, which means it is not in the atlas
+    uint naturalTileTextureIndex = uint(naturalTileDataColor.r * 255.0); // NOTE: assumes grayscale
+    bool isNaturalTileInvisible = naturalTileDataColor.a < 0.001; // If the alpha channel is 0, the texture doesn't exist, so keep it invisible
+// TODO: verify
+    // Get the world texture size dynamically 
+    ivec2 worldSize = textureSize(u_world_data_image_elementIdx8, 0); // Assuming world size texture is the reference
+    ivec2 tileTextureSize = textureSize(u_natural_tile_image_array, 0).xy; // Get tile texture resolution
+
+    // Compute cell-relative texture coordinates
+    vec2 cellTexCoord = fract(v_texCoord * vec2(worldSize)); 
+    vec2 naturalTileTexCoord = cellTexCoord * (vec2(tileTextureSize) / vec2(worldSize));
+
+    // Sample the appropriate tile texture
+    vec4 naturalTileTexture = isNaturalTileInvisible ? uiOverlayColor
+                                                    : texture(u_natural_tile_image_array, vec3(naturalTileTexCoord, naturalTileTextureIndex));
+// TODO: verify
     // Decode the RGBA color as a single 32-bit float
     float floatValue = decodeRGBAtoFloat(temperature_rgba);
 
     // outColor = vec4((color.rgb + downPixelColor.rgb)/2.0, 1);
     // outColor = vec4(color.rgb, 1);
     // outColor = floatToRGBA(floatValue);
-    outColor = vec4(uiOverlayColor.rgb, 1);
+    outColor = naturalTileTexture;
     // outColor = (  vec4(uiOverlayColor.rgb, 1) + vec4(floatToRGBA(floatValue).rgb, 1)   ) / 2.0;
 }
 `;
@@ -434,19 +465,28 @@ void main() {
         gl.bindTexture(gl.TEXTURE_2D, texture);
     }
 
-    createAndSetupTextureArray() { // TODO: mipmaps
+    createAndSetupTextureArray(usePixelArtSettings) { // TODO: mipmaps
         const gl = this.gl;
 
         const texture = gl.createTexture();
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
-     
-        // Set up texture so we can render any size image and so we are
-        // working with pixels (no mipmaps, no filtering, no repeating)
-        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-     
+
+        if (usePixelArtSettings === true) {
+            // Set up texture so we can render any size image and so we are
+            // working with pixels (no mipmaps, no filtering, no repeating)
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+        } else if (usePixelArtSettings === false) {
+            // Set up texture with mipmaps, filtering, and repeating
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        } else {
+            throw new Error("usePixelArtSettings must be a boolean.");
+        }
         return texture;
     }
 
@@ -516,9 +556,6 @@ void main() {
         for (let i = 0; i < depth; i++) {
             const { sourceImage, width, height } = isAtlas ? this.getImageFromAtlas(imageArrayOrAtlas, i, getAtlasBoundsForLayer)
                                                            : this.getImageFromImageArray(imageArrayOrAtlas, i);
-            if (isAtlas) {
-                console.log("Uploading atlas image to layer", i, "of", sourceImage.toDataURL());
-            }
 
             gl.texSubImage3D(
                 gl.TEXTURE_2D_ARRAY,    // Target texture type
@@ -532,9 +569,9 @@ void main() {
         }
     }
 
-    setupTextureArray(imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength) {
+    setupTextureArray(imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings) {
         // Create and setup a texture array
-        const textureArray = this.createAndSetupTextureArray();
+        const textureArray = this.createAndSetupTextureArray(usePixelArtSettings);
         this.allocateTextureArrayStorage(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength);
         this.uploadTextureArray(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength);
         return textureArray;
