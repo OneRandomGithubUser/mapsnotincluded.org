@@ -14,10 +14,10 @@ export default class WebGL2CanvasManager {
             return;
         }
     }
-    render(images, width, height, left_edge_x, bottom_edge_y) {
+    render(images, width, height, left_edge_x, bottom_edge_y, canvas_width, canvas_height) {
         const gl = this.gl;
 
-        this.resizeCanvas(images[0].width, images[0].height);
+        this.resizeCanvas(canvas_width, canvas_height);
 
         const vertexShaderSource = this.getVertexShaderGLSL();
         const fragmentShaderSource = this.getFragmentShaderGLSL();
@@ -50,6 +50,7 @@ export default class WebGL2CanvasManager {
         const getNaturalTileAtlasBounds = (layerIndex) => {
             return { x: layerIndex * NATURAL_TILES_TEXTURE_SIZE, y: 0, width: NATURAL_TILES_TEXTURE_SIZE, height: NATURAL_TILES_TEXTURE_SIZE };
         };
+        // TODO: rename to natural tiles everywhere
         const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlas, getNaturalTileAtlasBounds, naturalTilesImageAtlas.width/NATURAL_TILES_TEXTURE_SIZE, true);
 
         // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
@@ -218,8 +219,15 @@ vec4 floatToRGBA(float value) {
     }
 }
 
+// TODO: see if this is built-in
+vec2 pairwise_mult(vec2 vector_1, vec2 vector_2) {
+    return vec2(vector_1.x * vector_2.x, vector_1.y * vector_2.y);
+}
+
+vec2 k_cells_per_texture_tile = vec2(8.0, 8.0);
 
 void main() {
+    // TODO: half-pixel correction
     // Look up a color from the texture.
     vec4 color = texture(u_world_data_image_array, vec3(v_texCoord, 0)); // Layer 0 = elementIdx8
     // The color is a grayscale value representing the element index, which we can just use the red channel for // NOTE: assumes grayscale
@@ -236,11 +244,17 @@ void main() {
 // TODO: verify
     // Get the world texture size dynamically 
     ivec2 worldSize = textureSize(u_world_data_image_elementIdx8, 0); // Assuming world size texture is the reference
+    // e.g. (636, 404)
     ivec2 tileTextureSize = textureSize(u_natural_tile_image_array, 0).xy; // Get tile texture resolution
+    // e.g. (1024, 1024)
 
     // Compute cell-relative texture coordinates
-    vec2 cellTexCoord = fract(v_texCoord * vec2(worldSize)); 
-    vec2 naturalTileTexCoord = cellTexCoord * (vec2(tileTextureSize) / vec2(worldSize));
+    vec2 v_worldCellPositionFloat = v_texCoord * vec2(worldSize);   
+    // e.g. if v_texCoord = (0.123, 0.456) and worldSize = (636, 404) then v_worldCellPositionFloat = (78.228, 184.224)
+    vec2 cellTexCoord = fract(v_worldCellPositionFloat / k_cells_per_texture_tile);
+    // e.g. if v_worldCellPositionFloat = (78.228, 184.224) then cellTexCoord = (0.228, 0.224)
+    // vec2 cellTexCoord = fract(pairwise_mult(v_texCoord, vec2(worldSize))); TODO
+    vec2 naturalTileTexCoord = cellTexCoord;
 
     // Sample the appropriate tile texture
     vec4 naturalTileTexture = isNaturalTileInvisible ? uiOverlayColor
@@ -490,7 +504,7 @@ void main() {
         return texture;
     }
 
-    allocateTextureArrayStorage(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength) {
+    allocateTextureArrayStorage(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings) {
         const gl = this.gl;
 
         const isAtlas = getAtlasBoundsForLayer !== null; // Check if it's a single atlas image
@@ -504,11 +518,16 @@ void main() {
     
         // Allocate immutable storage for a 3D texture (TEXTURE_2D_ARRAY)
         gl.texStorage3D(
-            gl.TEXTURE_2D_ARRAY, // Specifies the texture type
-            1,                   // Number of mipmap levels (1 = no mipmaps)
-            gl.RGBA8,            // Internal storage format (8-bit RGBA per channel)
-            width, height, depth // Texture dimensions and depth (number of layers)
+            gl.TEXTURE_2D_ARRAY,                            // Specifies the texture type
+            usePixelArtSettings ? 1 : 11,     // Number of mipmap levels (1 = no mipmaps) TODO: is this really what this parameter is?
+            gl.RGBA8,                                       // Internal storage format (8-bit RGBA per channel)
+            width, height, depth                            // Texture dimensions and depth (number of layers)
         );
+        // TODO: 3 mipmaps: Invalid level count. GL_INVALID_OPERATION: Texture format does not support mipmap generation.
+        // 0 mipmaps: GL_INVALID_VALUE: Texture dimensions must all be greater than zero.
+        if (usePixelArtSettings) {
+            gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+        }
     }
 
     getImageFromAtlas(imageAtlas, layerIndex, getAtlasBoundsForLayer) {
@@ -572,7 +591,7 @@ void main() {
     setupTextureArray(imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings) {
         // Create and setup a texture array
         const textureArray = this.createAndSetupTextureArray(usePixelArtSettings);
-        this.allocateTextureArrayStorage(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength);
+        this.allocateTextureArrayStorage(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings);
         this.uploadTextureArray(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength);
         return textureArray;
     }
