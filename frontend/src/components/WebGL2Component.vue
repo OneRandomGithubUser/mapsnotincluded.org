@@ -48,18 +48,23 @@
             const NATURAL_TILES_TEXTURE_SIZE = 1024;
 
             const scale = 10;
-            const width = getRandomInt(636 * scale, 636 * 2 * scale);
-            const height = getRandomInt(404 * scale, 404 * 2 * scale);
-            const x_offset = getRandomInt(-20 * scale, -30 * scale);
-            const y_offset = getRandomInt(-20 * scale, -30 * scale); 
+            const width = getRandomInt(636 / scale, 636 * 2 / scale);
+            const height = getRandomInt(404 / scale, 404 * 2 / scale);
+            const x_offset = getRandomInt(20, 30);
+            const y_offset = getRandomInt(20, 30); 
 
-            loadImages([
+            let image_urls = [
                 "/elementIdx8.png",
                 "/temperature32.png",
                 "/mass32.png",
-                "/element_data_1x1.png",
-                `/tiles_mipmaps/${NATURAL_TILES_TEXTURE_SIZE}x${NATURAL_TILES_TEXTURE_SIZE}.png`
-            ], (images) => canvas_manager.render(images, width, height, x_offset, y_offset, 1000, 1000));
+                "/element_data_1x1.png"
+        ];
+
+            for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
+              image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
+            }
+
+            loadImages(image_urls, (images) => canvas_manager.render(images, width, height, x_offset, y_offset, 1000, 1000));
           //canvases.value[id].setRectangle(50, 50, 100, 100);
         }
       };
