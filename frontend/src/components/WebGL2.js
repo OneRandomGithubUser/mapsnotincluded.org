@@ -14,7 +14,14 @@ export default class WebGL2CanvasManager {
             return;
         }
     }
-    render(images, width, height, left_edge_x, bottom_edge_y, canvas_width, canvas_height) {
+    TextureArrayCreationSettings = class TextureArrayCreationSettings {
+        // TODO
+        constructor(usePixelArtSettings) {
+            this.usePixelArtSettings = usePixelArtSettings;
+        }
+    };
+    render(images, num_cells_width, num_cells_height, num_cells_left_edge_x, num_cells_bottom_edge_y, canvas_width, canvas_height) {
+        // TODO: lazy texture loading with large images
         const gl = this.gl;
 
         this.resizeCanvas(canvas_width, canvas_height);
@@ -28,30 +35,42 @@ export default class WebGL2CanvasManager {
         const vertexShader = shaders.vertexShader;
         const fragmentShader = shaders.fragmentShader;
 
-        const positionBuffer = this.setupPositionBuffer();
-        const texCoordBuffer = this.setupTextureBuffers();
+        
+        // Set a rectangle the same size as the image.
+        // NOTE: assumes that the world data images are the same size and are the same size as the world
+        const numCellsWorldWidth = images[0].width;
+        const numCellsWorldHeight = images[0].height;
+        const num_pixels_world_width = canvas_width / num_cells_width * numCellsWorldWidth;
+        const num_pixels_world_height = canvas_height / num_cells_height * numCellsWorldHeight;
+        const num_pixels_num_cells_left_edge_x = canvas_width / num_cells_width * num_cells_left_edge_x;
+        const num_pixels_num_cells_bottom_edge_y = canvas_width / num_cells_width * num_cells_bottom_edge_y;
+
+        const positionBuffer = this.setupPositionBuffer("a_position", num_pixels_num_cells_left_edge_x, num_pixels_num_cells_bottom_edge_y, num_pixels_world_width, num_pixels_world_height);
+        const texCoordBuffer = this.setupTextureBuffers("a_texCoord");
+        //this.setRectangle(positionBuffer, num_pixels_num_cells_left_edge_x, num_pixels_num_cells_bottom_edge_y, num_pixels_world_width, num_pixels_world_height);
 
         // provide texture coordinates for the rectangle.
         
         const worldDataImages = images.slice(0, 3);
         const { textures: worldDataTextures, framebuffers } = this.setupTextures(worldDataImages);
-        const worldEtmTextureArray = this.setupTextureArray(worldDataImages, null, null, true);
+        const worldEtmTextureArray = this.setupTextureArray(worldDataImages, null, null, true, false, false);
 
         const elementDataImageAtlas = images[3]; // TODO: keep style consistent
         const getElementDataAtlasBounds = (layerIndex) => {
             return { x: layerIndex, y: 0, width: 1, height: 2 };
         };
-        const elementDataTextureArray = this.setupTextureArray(elementDataImageAtlas, getElementDataAtlasBounds, elementDataImageAtlas.width, true);
+        const elementDataTextureArray = this.setupTextureArray(elementDataImageAtlas, getElementDataAtlasBounds, elementDataImageAtlas.width, true, false, false);
         // NOTE: assumption that the elementDataImageAtlas is a horizontal strip of 1x1 images. row 1 is the ui overlay color, row 2 is the element texture index (0-255, or invisible if there is none)
         // TODO: does this need to be a texture array?
 
-        const naturalTilesImageAtlas = images[4];
+        const naturalTilesImageAtlas = images.slice(4, 15);
         const NATURAL_TILES_TEXTURE_SIZE = 1024;
-        const getNaturalTileAtlasBounds = (layerIndex) => {
-            return { x: layerIndex * NATURAL_TILES_TEXTURE_SIZE, y: 0, width: NATURAL_TILES_TEXTURE_SIZE, height: NATURAL_TILES_TEXTURE_SIZE };
+        const getNaturalTileAtlasBounds = (layerIndex, mipmapIndex) => {
+            const textureSize = NATURAL_TILES_TEXTURE_SIZE / (2 ** mipmapIndex);
+            return { x: layerIndex * textureSize, y: 0, width: textureSize, height: textureSize };
         };
-        // TODO: rename to natural tiles everywhere
-        const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlas, getNaturalTileAtlasBounds, naturalTilesImageAtlas.width/NATURAL_TILES_TEXTURE_SIZE, true);
+        //const naturalTilesTextureArray = this.setupTextureArray(images[4], getNaturalTileAtlasBounds, images[4].width/NATURAL_TILES_TEXTURE_SIZE, false, false, false);
+        const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlas, getNaturalTileAtlasBounds, naturalTilesImageAtlas[0].width/NATURAL_TILES_TEXTURE_SIZE, false, true, true);
 
         // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
 
@@ -60,7 +79,8 @@ export default class WebGL2CanvasManager {
         // Tell it to use our program (pair of shaders)
         gl.useProgram(this.program);
 
-        this.setupUniforms();
+        // Pass in the canvas resolution so we can convert from pixels to clip space in the shader
+        this.bind2UniformFloatsToUnit(gl.canvas.width, gl.canvas.height, "u_resolution");
 
         this.bindTextureToUnit(worldDataTextures[0], images[0], "u_world_data_image_elementIdx8", 0);
         this.bindTextureToUnit(worldDataTextures[1], images[1], "u_world_data_image_temperature32", 1);
@@ -70,18 +90,14 @@ export default class WebGL2CanvasManager {
         this.bindTextureArrayToUnit(elementDataTextureArray, "u_element_data_image_array", 4);
         this.bindTextureArrayToUnit(naturalTilesTextureArray, "u_natural_tile_image_array", 5);
 
+        const NATURAL_TEXTURE_TILES_PER_CELL_X = 1 / 8;
+        const NATURAL_TEXTURE_TILES_PER_CELL_Y = 1 / 8;
+        const lodLevel = this.computeLodLevel(num_cells_width, num_cells_height, NATURAL_TEXTURE_TILES_PER_CELL_X, NATURAL_TEXTURE_TILES_PER_CELL_Y);
+        this.bind1UniformFloatsToUnit(lodLevel, "u_lod_level");
+        this.bind2UniformFloatsToUnit(NATURAL_TEXTURE_TILES_PER_CELL_X, NATURAL_TEXTURE_TILES_PER_CELL_Y, "u_natural_texture_tiles_per_cell");
+
         // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
         this.setFramebuffer(null, gl.canvas.width, gl.canvas.height);
-      
-        
-        // Bind the position buffer so gl.bufferData that will be called
-        // in setRectangle puts data in the position buffer
-        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-        
-        // Set a rectangle the same size as the image.
-        //this.setRectangle(0, 0, images[0].width * 2, images[0].height * 2);
-        //this.setRectangle(0, 0, images[0].width, images[0].height);
-        this.setRectangle(left_edge_x, bottom_edge_y, width, height); // TODO
 
         this.drawScene();
 
@@ -144,6 +160,9 @@ uniform sampler2DArray u_world_data_image_array;
 uniform sampler2DArray u_element_data_image_array;
 uniform sampler2DArray u_natural_tile_image_array;
 
+uniform float u_lod_level;
+uniform vec2 u_natural_texture_tiles_per_cell;
+
 // the texCoords passed in from the vertex shader.
 in vec2 v_texCoord;
 
@@ -180,9 +199,10 @@ float decodeRGBAtoFloat(vec4 rgba) {
 }
 
 // Interpolates between two colors based on a float value and control points
+// TODO: necessary? create a texture instead?
 vec3 interpolateColor(float value, float v1, vec3 c1, float v2, vec3 c2) {
     float t = clamp((value - v1) / (v2 - v1), 0.0, 1.0);
-    return mix(c1, c2, t); // Linear interpolation TODO readd
+    return mix(c1, c2, t); // Linear interpolation
 }
 
 // Converts a float into an RGBA color using control points
@@ -224,8 +244,6 @@ vec2 pairwise_mult(vec2 vector_1, vec2 vector_2) {
     return vec2(vector_1.x * vector_2.x, vector_1.y * vector_2.y);
 }
 
-vec2 k_cells_per_texture_tile = vec2(8.0, 8.0);
-
 void main() {
     // TODO: half-pixel correction
     // Look up a color from the texture.
@@ -243,7 +261,7 @@ void main() {
     bool isNaturalTileInvisible = naturalTileDataColor.a < 0.001; // If the alpha channel is 0, the texture doesn't exist, so keep it invisible
 // TODO: verify
     // Get the world texture size dynamically 
-    ivec2 worldSize = textureSize(u_world_data_image_elementIdx8, 0); // Assuming world size texture is the reference
+    ivec2 worldSize = textureSize(u_world_data_image_elementIdx8, 0); // Assuming element idx texture is the reference
     // e.g. (636, 404)
     ivec2 tileTextureSize = textureSize(u_natural_tile_image_array, 0).xy; // Get tile texture resolution
     // e.g. (1024, 1024)
@@ -251,14 +269,18 @@ void main() {
     // Compute cell-relative texture coordinates
     vec2 v_worldCellPositionFloat = v_texCoord * vec2(worldSize);   
     // e.g. if v_texCoord = (0.123, 0.456) and worldSize = (636, 404) then v_worldCellPositionFloat = (78.228, 184.224)
-    vec2 cellTexCoord = fract(v_worldCellPositionFloat / k_cells_per_texture_tile);
+
+    // NOTE: fract is not needed if we use GL_REPEAT to repeat the textures and "loop around" the edges when the coordinate is outside of the [0, 1] range
+    vec2 cellTexCoord = v_worldCellPositionFloat * u_natural_texture_tiles_per_cell;
+
     // e.g. if v_worldCellPositionFloat = (78.228, 184.224) then cellTexCoord = (0.228, 0.224)
-    // vec2 cellTexCoord = fract(pairwise_mult(v_texCoord, vec2(worldSize))); TODO
     vec2 naturalTileTexCoord = cellTexCoord;
 
     // Sample the appropriate tile texture
     vec4 naturalTileTexture = isNaturalTileInvisible ? uiOverlayColor
-                                                    : texture(u_natural_tile_image_array, vec3(naturalTileTexCoord, naturalTileTextureIndex));
+                                                    //: texture(u_natural_tile_image_array, vec3(naturalTileTexCoord, naturalTileTextureIndex));
+                                                    : textureLod(u_natural_tile_image_array, vec3(naturalTileTexCoord, naturalTileTextureIndex), u_lod_level);
+                                                    //: textureLod(u_natural_tile_image_array, vec3(naturalTileTexCoord, naturalTileTextureIndex), 10.53);
 // TODO: verify
     // Decode the RGBA color as a single 32-bit float
     float floatValue = decodeRGBAtoFloat(temperature_rgba);
@@ -268,6 +290,8 @@ void main() {
     // outColor = floatToRGBA(floatValue);
     outColor = naturalTileTexture;
     // outColor = (  vec4(uiOverlayColor.rgb, 1) + vec4(floatToRGBA(floatValue).rgb, 1)   ) / 2.0;
+
+    
 }
 `;
         return fragmentShaderSource;
@@ -307,11 +331,11 @@ void main() {
         return { program, vertexShader, fragmentShader };
     }
 
-    setupPositionBuffer() {
+    setupPositionBuffer(position_location, x, y, width, height) {
         const gl = this.gl;
 
         // look up where the vertex data needs to go.
-        const positionAttributeLocation = gl.getAttribLocation(this.program, "a_position");
+        const positionAttributeLocation = gl.getAttribLocation(this.program, position_location);
         
 
         // Create a buffer and put a single pixel space rectangle in
@@ -321,6 +345,21 @@ void main() {
 
         // Bind it to ARRAY_BUFFER (think of it as ARRAY_BUFFER = positionBuffer)
         gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+        const x1 = x;
+        const x2 = x + width;
+        const y1 = y;
+        const y2 = y + height;
+
+        const positions = new Float32Array([
+            x1, y1,
+            x2, y1,
+            x1, y2,
+            x1, y2,
+            x2, y1,
+            x2, y2
+        ]);
+        /*
         const positions = new Float32Array([
             10, 20,
             80, 20,
@@ -328,7 +367,7 @@ void main() {
             10, 30,
             80, 20,
             80, 30,
-        ]);
+        ]);*/
         gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
         
         // Create a vertex array object (attribute state)
@@ -354,11 +393,11 @@ void main() {
         return positionBuffer;
     }
 
-    setupTextureBuffers() {
+    setupTextureBuffers(texture_location) {
         const gl = this.gl;
 
         // look up where the vertex data needs to go.
-        const texCoordAttributeLocation = gl.getAttribLocation(this.program, "a_texCoord");
+        const texCoordAttributeLocation = gl.getAttribLocation(this.program, texture_location);
         
         const texCoordBuffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
@@ -381,17 +420,7 @@ void main() {
             texCoordAttributeLocation, size, type, normalize, stride, offset)
 
         return texCoordBuffer;
-    }
-
-    setupUniforms() {
-        const gl = this.gl;
-
-        // look up uniform locations
-        this.resolutionUniformLocation = gl.getUniformLocation(this.program, "u_resolution");
-    
-        // Pass in the canvas resolution so we can convert from pixels to clip space in the shader
-        gl.uniform2f(this.resolutionUniformLocation, gl.canvas.width, gl.canvas.height);
-    }    
+    }  
 
     setFramebuffer(fbo, width, height) {
         const gl = this.gl;
@@ -479,7 +508,7 @@ void main() {
         gl.bindTexture(gl.TEXTURE_2D, texture);
     }
 
-    createAndSetupTextureArray(usePixelArtSettings) { // TODO: mipmaps
+    createAndSetupTextureArray(usePixelArtSettings) {
         const gl = this.gl;
 
         const texture = gl.createTexture();
@@ -504,7 +533,7 @@ void main() {
         return texture;
     }
 
-    allocateTextureArrayStorage(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings) {
+    allocateTextureArrayStorage(textureArray, imageArrayOrAtlasOrMipmap, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, numProvidedMipmaps) {
         const gl = this.gl;
 
         const isAtlas = getAtlasBoundsForLayer !== null; // Check if it's a single atlas image
@@ -512,27 +541,27 @@ void main() {
         // Bind the texture array before allocating storage
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
     
-        const width     = isAtlas ? getAtlasBoundsForLayer(0).width     : imageArrayOrAtlas[0].width;
-        const height    = isAtlas ? getAtlasBoundsForLayer(0).height    : imageArrayOrAtlas[0].height;
-        const depth     = isAtlas ? atlasLength                         : imageArrayOrAtlas.length; // Number of layers
+        const width     = isAtlas ? getAtlasBoundsForLayer(0, 0).width     : imageArrayOrAtlasOrMipmap[0].width;
+        const height    = isAtlas ? getAtlasBoundsForLayer(0, 0).height    : imageArrayOrAtlasOrMipmap[0].height;
+        const depth     = isAtlas ? atlasLength                         : imageArrayOrAtlasOrMipmap.length; // Number of layers
+        const max_texture_dimension = Math.max(width, height);
+        const max_mipmap_levels = Math.floor(Math.log2(max_texture_dimension)) + 1;
+        if (isMipmapArray === true && numProvidedMipmaps !== max_mipmap_levels) {
+            throw new Error("The number of provided mipmaps must be equal to the maximum number of mipmap levels in manual mipmap uploads.");
+        }
     
         // Allocate immutable storage for a 3D texture (TEXTURE_2D_ARRAY)
         gl.texStorage3D(
-            gl.TEXTURE_2D_ARRAY,                            // Specifies the texture type
-            usePixelArtSettings ? 1 : 11,     // Number of mipmap levels (1 = no mipmaps) TODO: is this really what this parameter is?
-            gl.RGBA8,                                       // Internal storage format (8-bit RGBA per channel)
-            width, height, depth                            // Texture dimensions and depth (number of layers)
+            gl.TEXTURE_2D_ARRAY,                                // Specifies the texture type
+            usePixelArtSettings ? 1 : max_mipmap_levels,        // Number of mipmap levels (1 = no mipmaps)
+            gl.RGBA8,                                           // Internal storage format (8-bit RGBA per channel)
+            width, height, depth                                // Texture dimensions and depth (number of layers)
         );
-        // TODO: 3 mipmaps: Invalid level count. GL_INVALID_OPERATION: Texture format does not support mipmap generation.
-        // 0 mipmaps: GL_INVALID_VALUE: Texture dimensions must all be greater than zero.
-        if (usePixelArtSettings) {
-            gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
-        }
     }
 
-    getImageFromAtlas(imageAtlas, layerIndex, getAtlasBoundsForLayer) {
+    getImageFromAtlas(imageAtlas, layerIndex, mipmapIndex, getAtlasBoundsForLayer) {
         // Use the function to get bounds if an atlas is used
-        const bounds = getAtlasBoundsForLayer(layerIndex);
+        const bounds = getAtlasBoundsForLayer(layerIndex, mipmapIndex);
         const sx = bounds.x;
         const sy = bounds.y;
         const sw = bounds.width;
@@ -555,44 +584,60 @@ void main() {
         return { sourceImage, width, height };
     }
 
-    getImageFromImageArray(imageArray, layerIndex) {
+    getImageFromImageArray(imageArray, layerIndex, mipmapIndex) {
+        // TODO: mipmapIndex
         const sourceImage = imageArray[layerIndex];
         const width = sourceImage.width;
         const height = sourceImage.height;
         return { sourceImage, width, height };
     }
 
-    uploadTextureArray(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength) {
+    uploadTextureArray(textureArray, imageArrayOrAtlasOrMipmap, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, flipTexturesY, numProvidedMipmaps) {
         const gl = this.gl;
 
         const isAtlas = getAtlasBoundsForLayer !== null; // Check if it's a single atlas image
-        const depth = isAtlas ? atlasLength : imageArrayOrAtlas.length; // Number of layers
+        const depth = isAtlas ? atlasLength : imageArrayOrAtlasOrMipmap.length; // Number of layers
 
         // Bind the texture array before uploading
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
-        
-        // Upload each image as a separate layer in the texture array
-        for (let i = 0; i < depth; i++) {
-            const { sourceImage, width, height } = isAtlas ? this.getImageFromAtlas(imageArrayOrAtlas, i, getAtlasBoundsForLayer)
-                                                           : this.getImageFromImageArray(imageArrayOrAtlas, i);
 
-            gl.texSubImage3D(
-                gl.TEXTURE_2D_ARRAY,    // Target texture type
-                0,                      // Mipmap level
-                0, 0, i,                // x, y, z offsets (0 = no offset, z = layer index)
-                width, height, 1,       // Width, height, depth (1 layer at a time)
-                gl.RGBA,                // Source format
-                gl.UNSIGNED_BYTE,       // Source type
-                sourceImage               // Image data
-            );
+        if (flipTexturesY === true) {
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+        } else if (flipTexturesY === false) {
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+        } else {
+            throw new Error("flipTexturesY must be a boolean.");
+        }
+        
+        for (let mipmapLevel = 0; mipmapLevel < numProvidedMipmaps; mipmapLevel++) {
+            const sourceimageArrayOrAtlasOrMipmap = isMipmapArray ? imageArrayOrAtlasOrMipmap[mipmapLevel] : imageArrayOrAtlasOrMipmap;
+            // Upload each image as a separate layer in the texture array
+            for (let i = 0; i < depth; i++) {
+                const { sourceImage, width, height } = isAtlas ? this.getImageFromAtlas(sourceimageArrayOrAtlasOrMipmap, i, mipmapLevel, getAtlasBoundsForLayer)
+                                                            : this.getImageFromImageArray(sourceimageArrayOrAtlasOrMipmap, i, mipmapLevel);
+                gl.texSubImage3D(
+                    gl.TEXTURE_2D_ARRAY,    // Target texture type
+                    mipmapLevel,            // Mipmap level
+                    0, 0, i,                // x, y, z offsets (0 = no offset, z = layer index)
+                    width, height, 1,       // Width, height, depth (1 layer at a time)
+                    gl.RGBA,                // Source format
+                    gl.UNSIGNED_BYTE,       // Source type
+                    sourceImage             // Image data
+                );
+            }
+        }
+        if (usePixelArtSettings === false && isMipmapArray === false) {
+            gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
         }
     }
 
-    setupTextureArray(imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings) {
+    setupTextureArray(imageArrayOrAtlasOrMipmap, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, flipTexturesY) {
         // Create and setup a texture array
         const textureArray = this.createAndSetupTextureArray(usePixelArtSettings);
-        this.allocateTextureArrayStorage(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings);
-        this.uploadTextureArray(textureArray, imageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength);
+        const largestImageArrayOrAtlas = isMipmapArray ? imageArrayOrAtlasOrMipmap[0] : imageArrayOrAtlasOrMipmap;
+        const numProvidedMipmaps = isMipmapArray ? imageArrayOrAtlasOrMipmap.length : 1;
+        this.allocateTextureArrayStorage(textureArray, largestImageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, numProvidedMipmaps);
+        this.uploadTextureArray(textureArray, imageArrayOrAtlasOrMipmap, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, flipTexturesY, numProvidedMipmaps);
         return textureArray;
     }
 
@@ -609,6 +654,36 @@ void main() {
 
         // Bind texture array to texture unit at texture_unit_location
         gl.uniform1i(u_image_world_array_location, texture_unit_location);
+    }
+
+    bind1UniformFloatsToUnit(a, uniformLocation) {
+        const gl = this.gl;
+
+        // Get the uniform location in the shader
+        const u_uniform_location = gl.getUniformLocation(this.program, uniformLocation); 
+
+        // Pass the screen size to the shader
+        gl.uniform1f(u_uniform_location, a);
+    }
+
+    bind2UniformFloatsToUnit(a, b, uniformLocation) {
+        const gl = this.gl;
+
+        // Get the uniform location in the shader
+        const u_uniform_location = gl.getUniformLocation(this.program, uniformLocation); 
+
+        // Pass the screen size to the shader
+        gl.uniform2f(u_uniform_location, a, b);
+    }
+
+    computeLodLevel(renderedCellsX, renderedCellsY, textureTilesPerCellX, textureTilesPerCellY) {
+        // How many texture tiles will be rendered
+        const renderedTextureTilesX = renderedCellsX * textureTilesPerCellX;
+        const renderedTextureTilesY = renderedCellsY * textureTilesPerCellY;
+    
+        // Compute LOD using log2
+        const lodLevel = Math.log2(Math.max(renderedTextureTilesX, renderedTextureTilesY));
+        return lodLevel;
     }
 
     createShader(type, source) {
@@ -642,26 +717,28 @@ void main() {
         gl.deleteProgram(program);
     }
   
-    setRectangle(x, y, width, height) {
+    setRectangle(positionBuffer, x, y, width, height) {
         const gl = this.gl;
 
         const x1 = x;
         const x2 = x + width;
         const y1 = y;
         const y2 = y + height;
+      
+        // Bind the position buffer so gl.bufferData that will be called
+        // in setRectangle puts data in the position buffer
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+        const positions = new Float32Array([
+            x1, y1,
+            x2, y1,
+            x1, y2,
+            x1, y2,
+            x2, y1,
+            x2, y2
+        ])
        
-        // NOTE: gl.bufferData(gl.ARRAY_BUFFER, ...) will affect
-        // whatever buffer is bound to the `ARRAY_BUFFER` bind point
-        // but so far we only have one buffer. If we had more than one
-        // buffer we'd want to bind that buffer to `ARRAY_BUFFER` first.
-       
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-           x1, y1,
-           x2, y1,
-           x1, y2,
-           x1, y2,
-           x2, y1,
-           x2, y2]), gl.STATIC_DRAW);
+        gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
     }
 
     drawRectangles() {
