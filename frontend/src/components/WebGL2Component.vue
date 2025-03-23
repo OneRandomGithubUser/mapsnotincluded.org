@@ -14,9 +14,9 @@
   
   <script>
   import { ref } from "vue";
-  import WebGL2CanvasManager from "@/components/WebGL2.js"; // Import the class
+  import WebGL2CanvasManager from "@/components/WebGL2_ts.js"; // Import the class
   import { loadImages } from "./LoadImage";
-  
+
 
             function getRandomInt(min, max) {
                 const min_int = Math.ceil(min);
@@ -64,7 +64,7 @@
               image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
             }
 
-            loadImages(image_urls, (images) => canvas_manager.render(images, width, height, x_offset, y_offset, 1000, 1000));
+            loadImages(image_urls, (images) => canvas_manager.render(images, width, height, x_offset, y_offset, 636 * 2, 404 * 2));
           //canvases.value[id].setRectangle(50, 50, 100, 100);
         }
       };
