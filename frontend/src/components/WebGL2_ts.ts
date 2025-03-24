@@ -9,9 +9,11 @@ interface TextureLevel {
         width: number,
         height: number
     };
+    getNumTextureLayers() : number;
 }
 interface TextureLevelMipmapArray {
     // TODO
+    getMipmapArray() : TextureLevel[];
     getNumProvidedMipmaps(): number;
 }
 
@@ -40,6 +42,7 @@ class TextureAtlas implements TextureLevel {
         width: number;
         height: number;
     };
+    private readonly atlasDepth: number;
 
     constructor(
         imageAtlas: TexImageSource,
@@ -49,9 +52,11 @@ class TextureAtlas implements TextureLevel {
             width: number;
             height: number;
         },
+        atlasDepth: number,
     ) {
         this.imageAtlas = imageAtlas;
         this.getAtlasBoundsForLayer = getAtlasBoundsForLayer;
+        this.atlasDepth = atlasDepth;
     }
 
     private static toCanvasImageSource(source: TexImageSource): CanvasImageSource {
@@ -127,9 +132,12 @@ class TextureAtlas implements TextureLevel {
 
         return { sourceImage, width, height };
     }
+    getNumTextureLayers() : number {
+        return this.atlasDepth;
+    }
 }
 class TextureArray implements TextureLevel {
-    public imageArray: TexImageSource[]; // TODO: getter
+    public readonly imageArray: TexImageSource[]; // TODO: getter
     constructor(imageArray: TexImageSource[]) {
         this.imageArray = imageArray;
     }
@@ -149,23 +157,38 @@ class TextureArray implements TextureLevel {
         const height = dims.height;
         return { sourceImage, width, height };
     }
+    getNumTextureLayers() : number {
+        return this.imageArray.length;
+    }
 }
 class TextureAtlasMipmapArray implements TextureLevelMipmapArray {
-    public imageMipmaps: TextureAtlas[]; // TODO: getter
+    public readonly imageMipmaps: TextureAtlas[]; // TODO: getter
     constructor(imageMipmaps: TextureAtlas[]) {
+        if (imageMipmaps.length <= 0) {
+            throw new Error("No image mipmaps found.");
+        }
         this.imageMipmaps = imageMipmaps;
     }
     getNumProvidedMipmaps() : number {
         return this.imageMipmaps.length;
+    }
+    getMipmapArray() : TextureLevel[] {
+        return this.imageMipmaps;
     }
 }
 class TextureArrayMipmapArray implements TextureLevelMipmapArray {
-    public imageMipmaps: TextureArray[]; // TODO: getter
+    public readonly imageMipmaps: TextureArray[]; // TODO: getter
     constructor(imageMipmaps: TextureArray[]) {
+        if (imageMipmaps.length <= 0) {
+            throw new Error("No image mipmaps found.");
+        }
         this.imageMipmaps = imageMipmaps;
     }
     getNumProvidedMipmaps() : number {
         return this.imageMipmaps.length;
+    }
+    getMipmapArray() : TextureLevel[] {
+        return this.imageMipmaps;
     }
 }
 export default class WebGL2CanvasManager {
@@ -247,7 +270,11 @@ export default class WebGL2CanvasManager {
         const getElementDataAtlasBounds = (layerIndex: number) => {
             return { x: layerIndex, y: 0, width: 1, height: 2 };
         };
-        const elementDataImageAtlasWrapper = new TextureAtlas(elementDataImageAtlas, getElementDataAtlasBounds);
+        const elementDataImageAtlasWrapper = new TextureAtlas(
+            elementDataImageAtlas,
+            getElementDataAtlasBounds,
+            elementDataImageAtlas.width
+        );
         const elementDataTextureArray = this.setupTextureArray(elementDataImageAtlasWrapper, getElementDataAtlasBounds, elementDataImageAtlas.width, true, false, false);
         // NOTE: assumption that the elementDataImageAtlas is a horizontal strip of 1x1 images. row 1 is the ui overlay color, row 2 is the element texture index (0-255, or invisible if there is none)
         // TODO: does this need to be a texture array?
@@ -258,11 +285,15 @@ export default class WebGL2CanvasManager {
             const textureSize = NATURAL_TILES_TEXTURE_SIZE / (2 ** mipmapIndex);
             return { x: layerIndex * textureSize, y: 0, width: textureSize, height: textureSize };
         };
+        const NATURAL_TILES_TEXTURE_SIZE = 1024;
         for (let i = 0; i < naturalTilesImageAtlas.length; i++) {
-            naturalTilesImageAtlasTemp.push(new TextureAtlas(naturalTilesImageAtlas[i], getNaturalTileAtlasBounds));
+            naturalTilesImageAtlasTemp.push(new TextureAtlas(
+                naturalTilesImageAtlas[i],
+                getNaturalTileAtlasBounds,
+                naturalTilesImageAtlas[0].width/NATURAL_TILES_TEXTURE_SIZE
+            ));
         }
         const naturalTilesImageAtlasWrapper = new TextureAtlasMipmapArray(naturalTilesImageAtlasTemp);
-        const NATURAL_TILES_TEXTURE_SIZE = 1024;
         // TODO: rename to natural tiles everywhere
         //const naturalTilesTextureArray = this.setupTextureArray(images[4], getNaturalTileAtlasBounds, images[4].width/NATURAL_TILES_TEXTURE_SIZE, false, false, false);
         const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlasWrapper, getNaturalTileAtlasBounds, naturalTilesImageAtlas[0].width/NATURAL_TILES_TEXTURE_SIZE, false, true, true);

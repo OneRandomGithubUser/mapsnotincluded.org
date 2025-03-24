@@ -15,9 +15,10 @@ class TextureArrayCreationSettings {
     }
 }
 class TextureAtlas {
-    constructor(imageAtlas, getAtlasBoundsForLayer) {
+    constructor(imageAtlas, getAtlasBoundsForLayer, atlasDepth) {
         this.imageAtlas = imageAtlas;
         this.getAtlasBoundsForLayer = getAtlasBoundsForLayer;
+        this.atlasDepth = atlasDepth;
     }
     static toCanvasImageSource(source) {
         if (source instanceof HTMLImageElement ||
@@ -76,6 +77,9 @@ class TextureAtlas {
         const height = sh;
         return { sourceImage, width, height };
     }
+    getNumTextureLayers() {
+        return this.atlasDepth;
+    }
 }
 class TextureArray {
     constructor(imageArray) {
@@ -89,21 +93,36 @@ class TextureArray {
         const height = dims.height;
         return { sourceImage, width, height };
     }
+    getNumTextureLayers() {
+        return this.imageArray.length;
+    }
 }
 class TextureAtlasMipmapArray {
     constructor(imageMipmaps) {
+        if (imageMipmaps.length <= 0) {
+            throw new Error("No image mipmaps found.");
+        }
         this.imageMipmaps = imageMipmaps;
     }
     getNumProvidedMipmaps() {
         return this.imageMipmaps.length;
+    }
+    getMipmapArray() {
+        return this.imageMipmaps;
     }
 }
 class TextureArrayMipmapArray {
     constructor(imageMipmaps) {
+        if (imageMipmaps.length <= 0) {
+            throw new Error("No image mipmaps found.");
+        }
         this.imageMipmaps = imageMipmaps;
     }
     getNumProvidedMipmaps() {
         return this.imageMipmaps.length;
+    }
+    getMipmapArray() {
+        return this.imageMipmaps;
     }
 }
 export default class WebGL2CanvasManager {
@@ -159,7 +178,7 @@ export default class WebGL2CanvasManager {
         const getElementDataAtlasBounds = (layerIndex) => {
             return { x: layerIndex, y: 0, width: 1, height: 2 };
         };
-        const elementDataImageAtlasWrapper = new TextureAtlas(elementDataImageAtlas, getElementDataAtlasBounds);
+        const elementDataImageAtlasWrapper = new TextureAtlas(elementDataImageAtlas, getElementDataAtlasBounds, elementDataImageAtlas.width);
         const elementDataTextureArray = this.setupTextureArray(elementDataImageAtlasWrapper, getElementDataAtlasBounds, elementDataImageAtlas.width, true, false, false);
         // NOTE: assumption that the elementDataImageAtlas is a horizontal strip of 1x1 images. row 1 is the ui overlay color, row 2 is the element texture index (0-255, or invisible if there is none)
         // TODO: does this need to be a texture array?
@@ -169,11 +188,11 @@ export default class WebGL2CanvasManager {
             const textureSize = NATURAL_TILES_TEXTURE_SIZE / (2 ** mipmapIndex);
             return { x: layerIndex * textureSize, y: 0, width: textureSize, height: textureSize };
         };
+        const NATURAL_TILES_TEXTURE_SIZE = 1024;
         for (let i = 0; i < naturalTilesImageAtlas.length; i++) {
-            naturalTilesImageAtlasTemp.push(new TextureAtlas(naturalTilesImageAtlas[i], getNaturalTileAtlasBounds));
+            naturalTilesImageAtlasTemp.push(new TextureAtlas(naturalTilesImageAtlas[i], getNaturalTileAtlasBounds, naturalTilesImageAtlas[0].width / NATURAL_TILES_TEXTURE_SIZE));
         }
         const naturalTilesImageAtlasWrapper = new TextureAtlasMipmapArray(naturalTilesImageAtlasTemp);
-        const NATURAL_TILES_TEXTURE_SIZE = 1024;
         // TODO: rename to natural tiles everywhere
         //const naturalTilesTextureArray = this.setupTextureArray(images[4], getNaturalTileAtlasBounds, images[4].width/NATURAL_TILES_TEXTURE_SIZE, false, false, false);
         const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlasWrapper, getNaturalTileAtlasBounds, naturalTilesImageAtlas[0].width / NATURAL_TILES_TEXTURE_SIZE, false, true, true);
