@@ -4,41 +4,168 @@ import { loadImages } from "./LoadImage";
 
 interface TextureLevel {
     // TODO
+    getTextureLayer(layerIndex: number, mipmapIndex: number) : {
+        sourceImage: TexImageSource,
+        width: number,
+        height: number
+    };
 }
 interface TextureLevelMipmapArray {
     // TODO
-    // getNumProvidedMipmaps(): number;
+    getNumProvidedMipmaps(): number;
 }
 
+/*
+getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        },
+        atlasLength: number,
+
+ */
 class TextureArrayCreationSettings {
     // TODO
     private usePixelArtSettings: boolean;
     constructor(usePixelArtSettings: boolean) {
         this.usePixelArtSettings = usePixelArtSettings;
     }
-};
+}
 class TextureAtlas implements TextureLevel {
-    public imageAtlas: TexImageSource; // TODO: getter
-    constructor(imageAtlas: TexImageSource) {
+    public readonly imageAtlas: TexImageSource; // TODO: getter
+    private readonly getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+    };
+
+    constructor(
+        imageAtlas: TexImageSource,
+        getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        },
+    ) {
         this.imageAtlas = imageAtlas;
+        this.getAtlasBoundsForLayer = getAtlasBoundsForLayer;
     }
-};
+
+    private static toCanvasImageSource(source: TexImageSource): CanvasImageSource {
+        if (
+            source instanceof HTMLImageElement ||
+            source instanceof HTMLCanvasElement ||
+            source instanceof HTMLVideoElement ||
+            source instanceof ImageBitmap ||
+            (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas)
+        ) {
+            return source; // Already valid
+        }
+
+        // Convert ImageData
+        if (source instanceof ImageData) {
+            const canvas = document.createElement("canvas");
+            canvas.width = source.width;
+            canvas.height = source.height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) throw new Error("Failed to get 2D context while converting ImageData.");
+            ctx.putImageData(source, 0, 0);
+            return canvas;
+        }
+
+        // Convert VideoFrame (if supported)
+        if (typeof VideoFrame !== "undefined" && source instanceof VideoFrame) {
+            const canvas = document.createElement("canvas");
+            canvas.width = source.displayWidth;
+            canvas.height = source.displayHeight;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) throw new Error("Failed to get 2D context while converting VideoFrame.");
+            // Draw the frame — drawImage supports VideoFrame as of modern browsers
+            ctx.drawImage(source, 0, 0);
+            return canvas;
+        }
+
+        throw new Error("Unsupported TexImageSource type for drawImage conversion.");
+    }
+
+    public getTextureLayer(
+        layerIndex: number,
+        mipmapIndex: number
+    ) : {
+        sourceImage: HTMLCanvasElement,
+        width: number,
+        height: number
+    } {
+        // Use the function to get bounds if an atlas is used
+        const bounds = this.getAtlasBoundsForLayer(layerIndex, mipmapIndex);
+        const sx = bounds.x;
+        const sy = bounds.y;
+        const sw = bounds.width;
+        const sh = bounds.height;
+
+        // Create a temporary canvas to extract the subregion
+        const tempCanvas = document.createElement("canvas");
+        tempCanvas.width = sw;
+        tempCanvas.height = sh;
+        const ctx = tempCanvas.getContext("2d");
+        if (ctx === null) {
+            throw new Error("Failed to get 2D context from temporary canvas.");
+        }
+
+        const safeImageAtlas = TextureAtlas.toCanvasImageSource(this.imageAtlas);
+
+        // Draw the subregion onto the temporary canvas
+        ctx.drawImage(safeImageAtlas, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        // Update sourceImage to be the extracted subregion
+        const sourceImage = tempCanvas;
+        const width = sw;
+        const height = sh;
+
+        return { sourceImage, width, height };
+    }
+}
 class TextureArray implements TextureLevel {
     public imageArray: TexImageSource[]; // TODO: getter
     constructor(imageArray: TexImageSource[]) {
         this.imageArray = imageArray;
     }
-};
+
+    getTextureLayer(
+        layerIndex: number,
+        mipmapIndex: number
+    ) : {
+        sourceImage: TexImageSource,
+        width: number,
+        height: number
+    } {
+        // TODO: mipmapIndex
+        const sourceImage = this.imageArray[layerIndex];
+        const dims = WebGL2CanvasManager.getCanvasImageSourceDims(sourceImage);
+        const width = dims.width;
+        const height = dims.height;
+        return { sourceImage, width, height };
+    }
+}
 class TextureAtlasMipmapArray implements TextureLevelMipmapArray {
     public imageMipmaps: TextureAtlas[]; // TODO: getter
     constructor(imageMipmaps: TextureAtlas[]) {
         this.imageMipmaps = imageMipmaps;
+    }
+    getNumProvidedMipmaps() : number {
+        return this.imageMipmaps.length;
     }
 }
 class TextureArrayMipmapArray implements TextureLevelMipmapArray {
     public imageMipmaps: TextureArray[]; // TODO: getter
     constructor(imageMipmaps: TextureArray[]) {
         this.imageMipmaps = imageMipmaps;
+    }
+    getNumProvidedMipmaps() : number {
+        return this.imageMipmaps.length;
     }
 }
 export default class WebGL2CanvasManager {
@@ -68,7 +195,22 @@ export default class WebGL2CanvasManager {
         this.vertexShader = shaders.vertexShader;
         this.fragmentShader = shaders.fragmentShader;
     }
-    render(images: HTMLImageElement[], num_cells_width: number, num_cells_height: number, num_cells_left_edge_x: number, num_cells_bottom_edge_y: number, canvas_width: number, canvas_height: number) {
+    setup(
+        images: HTMLImageElement[],
+        callback: () => {}
+    ) : void {
+        callback();
+    }
+    render(
+        images: HTMLImageElement[],
+        num_cells_width: number,
+        num_cells_height: number,
+        num_cells_left_edge_x: number,
+        num_cells_bottom_edge_y: number,
+        canvas_width: number,
+        canvas_height: number,
+        callback: () => {}
+    ) {
         // TODO: lazy texture loading with large images
         const gl = this.gl;
 
@@ -102,25 +244,25 @@ export default class WebGL2CanvasManager {
         const worldEtmTextureArray = this.setupTextureArray(worldDataImagesWrapper, dummyGetAtlasBoundsForLayer, -1, true, false, false);
 
         const elementDataImageAtlas = images[3]; // TODO: keep style consistent
-        const elementDataImageAtlasWrapper = new TextureAtlas(elementDataImageAtlas);
         const getElementDataAtlasBounds = (layerIndex: number) => {
             return { x: layerIndex, y: 0, width: 1, height: 2 };
         };
+        const elementDataImageAtlasWrapper = new TextureAtlas(elementDataImageAtlas, getElementDataAtlasBounds);
         const elementDataTextureArray = this.setupTextureArray(elementDataImageAtlasWrapper, getElementDataAtlasBounds, elementDataImageAtlas.width, true, false, false);
         // NOTE: assumption that the elementDataImageAtlas is a horizontal strip of 1x1 images. row 1 is the ui overlay color, row 2 is the element texture index (0-255, or invisible if there is none)
         // TODO: does this need to be a texture array?
 
         const naturalTilesImageAtlas = images.slice(4, 15);
         let naturalTilesImageAtlasTemp : TextureAtlas[] = []; // TODO: remove temp
-        for (let i = 0; i < naturalTilesImageAtlas.length; i++) {
-            naturalTilesImageAtlasTemp.push(new TextureAtlas(naturalTilesImageAtlas[i]));
-        }
-        const naturalTilesImageAtlasWrapper = new TextureAtlasMipmapArray(naturalTilesImageAtlasTemp);
-        const NATURAL_TILES_TEXTURE_SIZE = 1024;
         const getNaturalTileAtlasBounds = (layerIndex: number, mipmapIndex: number) => {
             const textureSize = NATURAL_TILES_TEXTURE_SIZE / (2 ** mipmapIndex);
             return { x: layerIndex * textureSize, y: 0, width: textureSize, height: textureSize };
         };
+        for (let i = 0; i < naturalTilesImageAtlas.length; i++) {
+            naturalTilesImageAtlasTemp.push(new TextureAtlas(naturalTilesImageAtlas[i], getNaturalTileAtlasBounds));
+        }
+        const naturalTilesImageAtlasWrapper = new TextureAtlasMipmapArray(naturalTilesImageAtlasTemp);
+        const NATURAL_TILES_TEXTURE_SIZE = 1024;
         // TODO: rename to natural tiles everywhere
         //const naturalTilesTextureArray = this.setupTextureArray(images[4], getNaturalTileAtlasBounds, images[4].width/NATURAL_TILES_TEXTURE_SIZE, false, false, false);
         const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlasWrapper, getNaturalTileAtlasBounds, naturalTilesImageAtlas[0].width/NATURAL_TILES_TEXTURE_SIZE, false, true, true);
@@ -158,6 +300,8 @@ export default class WebGL2CanvasManager {
         this.drawScene();
 
         console.log("Checking WebGL errors at the end of render():", gl.getError()); // TODO: more error reporting
+
+        callback();
     }
 
     getVertexShaderGLSL() {
@@ -748,86 +892,6 @@ void main() {
         }
     }
 
-    static toCanvasImageSource(source: TexImageSource): CanvasImageSource {
-        if (
-            source instanceof HTMLImageElement ||
-            source instanceof HTMLCanvasElement ||
-            source instanceof HTMLVideoElement ||
-            source instanceof ImageBitmap ||
-            (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas)
-        ) {
-            return source; // Already valid
-        }
-
-        // Convert ImageData
-        if (source instanceof ImageData) {
-            const canvas = document.createElement("canvas");
-            canvas.width = source.width;
-            canvas.height = source.height;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) throw new Error("Failed to get 2D context while converting ImageData.");
-            ctx.putImageData(source, 0, 0);
-            return canvas;
-        }
-
-        // Convert VideoFrame (if supported)
-        if (typeof VideoFrame !== "undefined" && source instanceof VideoFrame) {
-            const canvas = document.createElement("canvas");
-            canvas.width = source.displayWidth;
-            canvas.height = source.displayHeight;
-            const ctx = canvas.getContext("2d");
-            if (!ctx) throw new Error("Failed to get 2D context while converting VideoFrame.");
-            // Draw the frame — drawImage supports VideoFrame as of modern browsers
-            ctx.drawImage(source, 0, 0);
-            return canvas;
-        }
-
-        throw new Error("Unsupported TexImageSource type for drawImage conversion.");
-    }
-
-    getImageFromAtlas(
-        imageAtlas: TexImageSource,
-        layerIndex: number,
-        mipmapIndex: number,
-        getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
-            x: number;
-            y: number;
-            width: number;
-            height: number;
-    }) : {
-        sourceImage: HTMLCanvasElement,
-        width: number,
-        height: number
-    } {
-        // Use the function to get bounds if an atlas is used
-        const bounds = getAtlasBoundsForLayer(layerIndex, mipmapIndex);
-        const sx = bounds.x;
-        const sy = bounds.y;
-        const sw = bounds.width;
-        const sh = bounds.height;
-
-        // Create a temporary canvas to extract the subregion
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = sw;
-        tempCanvas.height = sh;
-        const ctx = tempCanvas.getContext("2d");
-        if (ctx === null) {
-            throw new Error("Failed to get 2D context from temporary canvas.");
-        }
-
-        const safeImageAtlas = WebGL2CanvasManager.toCanvasImageSource(imageAtlas);
-
-        // Draw the subregion onto the temporary canvas
-        ctx.drawImage(safeImageAtlas, sx, sy, sw, sh, 0, 0, sw, sh);
-
-        // Update sourceImage to be the extracted subregion
-        const sourceImage = tempCanvas;
-        const width = sw;
-        const height = sh;
-
-        return { sourceImage, width, height };
-    }
-
     getImageFromImageArray(
         imageArray: TexImageSource[],
         layerIndex: number,
@@ -845,19 +909,20 @@ void main() {
         return { sourceImage, width, height };
     }
 
-    uploadTextureArray(textureArray: WebGLTexture,
-                       imageArrayOrAtlasOrMipmap: TextureAtlas | TextureArray | TextureAtlasMipmapArray | TextureArrayMipmapArray,
-                       getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
-                           x: number;
-                           y: number;
-                           width: number;
-                           height: number;
-                       },
-                       atlasLength: number,
-                       usePixelArtSettings: boolean,
-                       isMipmapArray: boolean,
-                       flipTexturesY: boolean,
-                       numProvidedMipmaps: number
+    uploadTextureArray(
+        textureArray: WebGLTexture,
+        imageArrayOrAtlasOrMipmap: TextureAtlas | TextureArray | TextureAtlasMipmapArray | TextureArrayMipmapArray,
+        getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        },
+        atlasLength: number,
+        usePixelArtSettings: boolean,
+        isMipmapArray: boolean,
+        flipTexturesY: boolean,
+        numProvidedMipmaps: number
     ) : void {
         const gl = this.gl;
 
@@ -905,9 +970,7 @@ void main() {
             // Upload each image as a separate layer in the texture array
             for (let i = 0; i < depth; i++) {
                 const { sourceImage, width, height } =
-                    (sourceimageArrayOrAtlasOrMipmap instanceof TextureArray)
-                        ? this.getImageFromImageArray(sourceimageArrayOrAtlasOrMipmap.imageArray, i, mipmapLevel)
-                        : this.getImageFromAtlas(sourceimageArrayOrAtlasOrMipmap.imageAtlas, i, mipmapLevel, getAtlasBoundsForLayer);
+                        sourceimageArrayOrAtlasOrMipmap.getTextureLayer(i, mipmapLevel);
                 gl.texSubImage3D(
                     gl.TEXTURE_2D_ARRAY,    // Target texture type
                     mipmapLevel,            // Mipmap level
@@ -924,17 +987,18 @@ void main() {
         }
     }
 
-    setupTextureArray(imageArrayOrAtlasOrMipmap: TextureAtlas | TextureArray | TextureAtlasMipmapArray | TextureArrayMipmapArray,
-                      getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
-                          x: number;
-                          y: number;
-                          width: number;
-                          height: number;
-                      },
-                      atlasLength: number,
-                      usePixelArtSettings: boolean,
-                      isMipmapArray: boolean,
-                      flipTexturesY: boolean
+    setupTextureArray(
+        imageArrayOrAtlasOrMipmap: TextureAtlas | TextureArray | TextureAtlasMipmapArray | TextureArrayMipmapArray,
+        getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+        },
+        atlasLength: number,
+        usePixelArtSettings: boolean,
+        isMipmapArray: boolean,
+        flipTexturesY: boolean
     ) : WebGLTexture {
         // Create and setup a texture array
         const textureArray = this.createAndSetupTextureArray(usePixelArtSettings);
