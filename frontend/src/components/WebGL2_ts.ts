@@ -2,6 +2,30 @@
 
 import { loadImages } from "./LoadImage";
 
+
+function getCanvasImageSourceDims(
+    source: TexImageSource
+): {
+    width: number;
+    height: number
+} {
+
+    if (
+        source instanceof HTMLImageElement ||
+        source instanceof HTMLCanvasElement ||
+        source instanceof HTMLVideoElement ||
+        source instanceof ImageData ||
+        (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas ||
+            source instanceof ImageBitmap)
+    ) {
+        const width: number = source.width;
+        const height: number = source.height;
+        return { width, height };
+    } else {
+        throw new Error("Unsupported image type for width/height lookup");
+    }
+}
+
 interface TextureLevel {
     // TODO
     getTextureLayer(layerIndex: number, mipmapIndex: number) : {
@@ -10,11 +34,14 @@ interface TextureLevel {
         height: number
     };
     getNumTextureLayers() : number;
+    getTextureWidth() : number;
+    getTextureHeight() : number;
 }
 interface TextureLevelMipmapArray {
     // TODO
     getMipmapArray() : TextureLevel[];
     getNumProvidedMipmaps(): number;
+    getNumTextureLayers() : number;
 }
 
 /*
@@ -35,7 +62,7 @@ class TextureArrayCreationSettings {
     }
 }
 class TextureAtlas implements TextureLevel {
-    public readonly imageAtlas: TexImageSource; // TODO: getter
+    private readonly imageAtlas: TexImageSource; // TODO: getter
     private readonly getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
         x: number;
         y: number;
@@ -43,6 +70,8 @@ class TextureAtlas implements TextureLevel {
         height: number;
     };
     private readonly atlasDepth: number;
+    private readonly width: number;
+    private readonly height: number;
 
     constructor(
         imageAtlas: TexImageSource,
@@ -54,9 +83,27 @@ class TextureAtlas implements TextureLevel {
         },
         atlasDepth: number,
     ) {
+        if (atlasDepth <= 0) {
+            throw new Error("Atlas depth must be a positive integer");
+        }
+
         this.imageAtlas = imageAtlas;
         this.getAtlasBoundsForLayer = getAtlasBoundsForLayer;
         this.atlasDepth = atlasDepth;
+
+        const firstInfo = this.getTextureLayer(0, 0);
+        // TODO: move mipmap index logic elsewhere
+        for (let i = 1; i < atlasDepth; i++) {
+            const currInfo = this.getTextureLayer(i, 0);
+            if (currInfo.height !== firstInfo.height) {
+                throw new Error("All heights must match.");
+            }
+            if (currInfo.width !== firstInfo.width) {
+                throw new Error("All widths must match.");
+            }
+        }
+        this.width = firstInfo.width;
+        this.height = firstInfo.height;
     }
 
     private static toCanvasImageSource(source: TexImageSource): CanvasImageSource {
@@ -135,11 +182,37 @@ class TextureAtlas implements TextureLevel {
     getNumTextureLayers() : number {
         return this.atlasDepth;
     }
+    getTextureWidth(): number {
+        return this.width;
+    }
+    getTextureHeight(): number {
+        return this.height;
+    }
 }
 class TextureArray implements TextureLevel {
-    public readonly imageArray: TexImageSource[]; // TODO: getter
+    private readonly imageArray: TexImageSource[]; // TODO: getter
+    private readonly width: number;
+    private readonly height: number;
     constructor(imageArray: TexImageSource[]) {
+        if (imageArray.length <= 0) {
+            throw new Error("ImageArray length must be a positive integer");
+        }
+
         this.imageArray = imageArray;
+
+        const firstInfo = this.getTextureLayer(0, 0);
+        // TODO: repeated code from TextureAtlas
+        for (let i = 1; i < imageArray.length; i++) {
+            const currInfo = this.getTextureLayer(i, 0);
+            if (currInfo.height !== firstInfo.height) {
+                throw new Error("All heights must match.");
+            }
+            if (currInfo.width !== firstInfo.width) {
+                throw new Error("All widths must match.");
+            }
+        }
+        this.width = firstInfo.width;
+        this.height = firstInfo.height;
     }
 
     getTextureLayer(
@@ -152,7 +225,7 @@ class TextureArray implements TextureLevel {
     } {
         // TODO: mipmapIndex
         const sourceImage = this.imageArray[layerIndex];
-        const dims = WebGL2CanvasManager.getCanvasImageSourceDims(sourceImage);
+        const dims = getCanvasImageSourceDims(sourceImage);
         const width = dims.width;
         const height = dims.height;
         return { sourceImage, width, height };
@@ -160,13 +233,31 @@ class TextureArray implements TextureLevel {
     getNumTextureLayers() : number {
         return this.imageArray.length;
     }
+    getTextureWidth(): number {
+        return this.width;
+    }
+    getTextureHeight(): number {
+        return this.height;
+    }
 }
 class TextureAtlasMipmapArray implements TextureLevelMipmapArray {
     public readonly imageMipmaps: TextureAtlas[]; // TODO: getter
+    private readonly depth: number;
     constructor(imageMipmaps: TextureAtlas[]) {
         if (imageMipmaps.length <= 0) {
             throw new Error("No image mipmaps found.");
         }
+
+        const firstImageMipmap = imageMipmaps[0];
+        this.depth = firstImageMipmap.getNumTextureLayers();
+        for (let i = 1; i < imageMipmaps.length; i++) {
+            const currImageMipmap = imageMipmaps[i];
+            const currTextureLayers = currImageMipmap.getNumTextureLayers();
+            if (currTextureLayers !== this.depth) {
+                throw new Error("Image mipmaps were not of the same depth.");
+            }
+        }
+
         this.imageMipmaps = imageMipmaps;
     }
     getNumProvidedMipmaps() : number {
@@ -174,14 +265,30 @@ class TextureAtlasMipmapArray implements TextureLevelMipmapArray {
     }
     getMipmapArray() : TextureLevel[] {
         return this.imageMipmaps;
+    }
+    getNumTextureLayers(): number {
+        return this.depth;
     }
 }
 class TextureArrayMipmapArray implements TextureLevelMipmapArray {
     public readonly imageMipmaps: TextureArray[]; // TODO: getter
+    private readonly depth: number;
     constructor(imageMipmaps: TextureArray[]) {
         if (imageMipmaps.length <= 0) {
             throw new Error("No image mipmaps found.");
         }
+
+        // TODO: repeated code from TextureAtlasMipmapArray
+        const firstImageMipmap = imageMipmaps[0];
+        this.depth = firstImageMipmap.getNumTextureLayers();
+        for (let i = 1; i < imageMipmaps.length; i++) {
+            const currImageMipmap = imageMipmaps[i];
+            const currTextureLayers = currImageMipmap.getNumTextureLayers();
+            if (currTextureLayers !== this.depth) {
+                throw new Error("Image mipmaps were not of the same depth.");
+            }
+        }
+
         this.imageMipmaps = imageMipmaps;
     }
     getNumProvidedMipmaps() : number {
@@ -189,6 +296,9 @@ class TextureArrayMipmapArray implements TextureLevelMipmapArray {
     }
     getMipmapArray() : TextureLevel[] {
         return this.imageMipmaps;
+    }
+    getNumTextureLayers(): number {
+        return this.depth;
     }
 }
 export default class WebGL2CanvasManager {
@@ -870,13 +980,9 @@ void main() {
             height = bounds.height;
             depth = atlasLength;
         } else {
-            const first = imageArrayOrAtlasOrMipmap.imageArray[0];
-
-            const dims = WebGL2CanvasManager.getCanvasImageSourceDims(first);
-            width = dims.width;
-            height = dims.height;
-
-            depth = imageArrayOrAtlasOrMipmap.imageArray.length;
+            width = imageArrayOrAtlasOrMipmap.getTextureWidth();
+            height = imageArrayOrAtlasOrMipmap.getTextureHeight();
+            depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
         }
 
 
@@ -898,46 +1004,6 @@ void main() {
             gl.RGBA8,                                           // Internal storage format (8-bit RGBA per channel)
             width, height, depth                                // Texture dimensions and depth (number of layers)
         );
-    }
-
-    static getCanvasImageSourceDims(
-        source: TexImageSource
-    ): {
-        width: number;
-        height: number
-    } {
-
-        if (
-            source instanceof HTMLImageElement ||
-            source instanceof HTMLCanvasElement ||
-            source instanceof HTMLVideoElement ||
-            source instanceof ImageData ||
-            (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas ||
-            source instanceof ImageBitmap)
-        ) {
-            const width: number = source.width;
-            const height: number = source.height;
-            return { width, height };
-        } else {
-            throw new Error("Unsupported image type for width/height lookup");
-        }
-    }
-
-    getImageFromImageArray(
-        imageArray: TexImageSource[],
-        layerIndex: number,
-        mipmapIndex: number
-    ) : {
-        sourceImage: TexImageSource,
-        width: number,
-        height: number
-    } {
-        // TODO: mipmapIndex
-        const sourceImage = imageArray[layerIndex];
-        const dims = WebGL2CanvasManager.getCanvasImageSourceDims(sourceImage);
-        const width = dims.width;
-        const height = dims.height;
-        return { sourceImage, width, height };
     }
 
     uploadTextureArray(
@@ -963,9 +1029,9 @@ void main() {
             // TODO: this check should be a class method
             _depth = atlasLength;
         } else if (imageArrayOrAtlasOrMipmap instanceof TextureArray) {
-            _depth = imageArrayOrAtlasOrMipmap.imageArray.length;
+            _depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
         } else if (imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) {
-            _depth = imageArrayOrAtlasOrMipmap.imageMipmaps[0].imageArray.length;
+            _depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
         } else {
             throw new Error("unimplemented action");
         }

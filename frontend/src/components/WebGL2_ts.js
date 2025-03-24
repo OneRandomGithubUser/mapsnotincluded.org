@@ -1,4 +1,19 @@
 // Confused? See https://webgl2fundamentals.org/webgl/lessons/webgl-fundamentals.html.
+function getCanvasImageSourceDims(source) {
+    if (source instanceof HTMLImageElement ||
+        source instanceof HTMLCanvasElement ||
+        source instanceof HTMLVideoElement ||
+        source instanceof ImageData ||
+        (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas ||
+            source instanceof ImageBitmap)) {
+        const width = source.width;
+        const height = source.height;
+        return { width, height };
+    }
+    else {
+        throw new Error("Unsupported image type for width/height lookup");
+    }
+}
 /*
 getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
             x: number;
@@ -16,9 +31,25 @@ class TextureArrayCreationSettings {
 }
 class TextureAtlas {
     constructor(imageAtlas, getAtlasBoundsForLayer, atlasDepth) {
+        if (atlasDepth <= 0) {
+            throw new Error("Atlas depth must be a positive integer");
+        }
         this.imageAtlas = imageAtlas;
         this.getAtlasBoundsForLayer = getAtlasBoundsForLayer;
         this.atlasDepth = atlasDepth;
+        const firstInfo = this.getTextureLayer(0, 0);
+        // TODO: move mipmap index logic elsewhere
+        for (let i = 1; i < atlasDepth; i++) {
+            const currInfo = this.getTextureLayer(i, 0);
+            if (currInfo.height !== firstInfo.height) {
+                throw new Error("All heights must match.");
+            }
+            if (currInfo.width !== firstInfo.width) {
+                throw new Error("All widths must match.");
+            }
+        }
+        this.width = firstInfo.width;
+        this.height = firstInfo.height;
     }
     static toCanvasImageSource(source) {
         if (source instanceof HTMLImageElement ||
@@ -80,15 +111,37 @@ class TextureAtlas {
     getNumTextureLayers() {
         return this.atlasDepth;
     }
+    getTextureWidth() {
+        return this.width;
+    }
+    getTextureHeight() {
+        return this.height;
+    }
 }
 class TextureArray {
     constructor(imageArray) {
+        if (imageArray.length <= 0) {
+            throw new Error("ImageArray length must be a positive integer");
+        }
         this.imageArray = imageArray;
+        const firstInfo = this.getTextureLayer(0, 0);
+        // TODO: repeated code from TextureAtlas
+        for (let i = 1; i < imageArray.length; i++) {
+            const currInfo = this.getTextureLayer(i, 0);
+            if (currInfo.height !== firstInfo.height) {
+                throw new Error("All heights must match.");
+            }
+            if (currInfo.width !== firstInfo.width) {
+                throw new Error("All widths must match.");
+            }
+        }
+        this.width = firstInfo.width;
+        this.height = firstInfo.height;
     }
     getTextureLayer(layerIndex, mipmapIndex) {
         // TODO: mipmapIndex
         const sourceImage = this.imageArray[layerIndex];
-        const dims = WebGL2CanvasManager.getCanvasImageSourceDims(sourceImage);
+        const dims = getCanvasImageSourceDims(sourceImage);
         const width = dims.width;
         const height = dims.height;
         return { sourceImage, width, height };
@@ -96,11 +149,26 @@ class TextureArray {
     getNumTextureLayers() {
         return this.imageArray.length;
     }
+    getTextureWidth() {
+        return this.width;
+    }
+    getTextureHeight() {
+        return this.height;
+    }
 }
 class TextureAtlasMipmapArray {
     constructor(imageMipmaps) {
         if (imageMipmaps.length <= 0) {
             throw new Error("No image mipmaps found.");
+        }
+        const firstImageMipmap = imageMipmaps[0];
+        this.depth = firstImageMipmap.getNumTextureLayers();
+        for (let i = 1; i < imageMipmaps.length; i++) {
+            const currImageMipmap = imageMipmaps[i];
+            const currTextureLayers = currImageMipmap.getNumTextureLayers();
+            if (currTextureLayers !== this.depth) {
+                throw new Error("Image mipmaps were not of the same depth.");
+            }
         }
         this.imageMipmaps = imageMipmaps;
     }
@@ -109,6 +177,9 @@ class TextureAtlasMipmapArray {
     }
     getMipmapArray() {
         return this.imageMipmaps;
+    }
+    getNumTextureLayers() {
+        return this.depth;
     }
 }
 class TextureArrayMipmapArray {
@@ -116,6 +187,16 @@ class TextureArrayMipmapArray {
         if (imageMipmaps.length <= 0) {
             throw new Error("No image mipmaps found.");
         }
+        // TODO: repeated code from TextureAtlasMipmapArray
+        const firstImageMipmap = imageMipmaps[0];
+        this.depth = firstImageMipmap.getNumTextureLayers();
+        for (let i = 1; i < imageMipmaps.length; i++) {
+            const currImageMipmap = imageMipmaps[i];
+            const currTextureLayers = currImageMipmap.getNumTextureLayers();
+            if (currTextureLayers !== this.depth) {
+                throw new Error("Image mipmaps were not of the same depth.");
+            }
+        }
         this.imageMipmaps = imageMipmaps;
     }
     getNumProvidedMipmaps() {
@@ -123,6 +204,9 @@ class TextureArrayMipmapArray {
     }
     getMipmapArray() {
         return this.imageMipmaps;
+    }
+    getNumTextureLayers() {
+        return this.depth;
     }
 }
 export default class WebGL2CanvasManager {
@@ -649,11 +733,9 @@ void main() {
             depth = atlasLength;
         }
         else {
-            const first = imageArrayOrAtlasOrMipmap.imageArray[0];
-            const dims = WebGL2CanvasManager.getCanvasImageSourceDims(first);
-            width = dims.width;
-            height = dims.height;
-            depth = imageArrayOrAtlasOrMipmap.imageArray.length;
+            width = imageArrayOrAtlasOrMipmap.getTextureWidth();
+            height = imageArrayOrAtlasOrMipmap.getTextureHeight();
+            depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
         }
         // TODO: delete if this works
         //const width     = !Array.isArray(imageArrayOrAtlasOrMipmap) ? getAtlasBoundsForLayer(0, 0).width     : imageArrayOrAtlasOrMipmap[0].width;
@@ -671,29 +753,6 @@ void main() {
         width, height, depth // Texture dimensions and depth (number of layers)
         );
     }
-    static getCanvasImageSourceDims(source) {
-        if (source instanceof HTMLImageElement ||
-            source instanceof HTMLCanvasElement ||
-            source instanceof HTMLVideoElement ||
-            source instanceof ImageData ||
-            (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas ||
-                source instanceof ImageBitmap)) {
-            const width = source.width;
-            const height = source.height;
-            return { width, height };
-        }
-        else {
-            throw new Error("Unsupported image type for width/height lookup");
-        }
-    }
-    getImageFromImageArray(imageArray, layerIndex, mipmapIndex) {
-        // TODO: mipmapIndex
-        const sourceImage = imageArray[layerIndex];
-        const dims = WebGL2CanvasManager.getCanvasImageSourceDims(sourceImage);
-        const width = dims.width;
-        const height = dims.height;
-        return { sourceImage, width, height };
-    }
     uploadTextureArray(textureArray, imageArrayOrAtlasOrMipmap, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, flipTexturesY, numProvidedMipmaps) {
         const gl = this.gl;
         const isAtlas = Array.isArray(imageArrayOrAtlasOrMipmap); // Check if it's a single atlas image
@@ -703,10 +762,10 @@ void main() {
             _depth = atlasLength;
         }
         else if (imageArrayOrAtlasOrMipmap instanceof TextureArray) {
-            _depth = imageArrayOrAtlasOrMipmap.imageArray.length;
+            _depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
         }
         else if (imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) {
-            _depth = imageArrayOrAtlasOrMipmap.imageMipmaps[0].imageArray.length;
+            _depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
         }
         else {
             throw new Error("unimplemented action");
