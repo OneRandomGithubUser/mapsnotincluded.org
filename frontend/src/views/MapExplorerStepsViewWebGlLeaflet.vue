@@ -416,9 +416,9 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
     const timeStart = DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : performance.now();
     DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("start createZoomedTile");
 
-    const scale = get_size_from_zoom(z);
-    const gridSize = get_xy_scale_from_zoom(z) + 1;
-    const boundarySize = get_xy_scale_from_zoom(z);
+    const scale = get_map_units_per_cell_from_zoom(z);
+    const gridSize = get_cells_per_zoom_0_map_tile_from_zoom(z) + 1;
+    const boundarySize = get_cells_per_zoom_0_map_tile_from_zoom(z);
 
     // Offscreen canvas for final output
     const offCanvas = document.createElement('canvas');
@@ -547,7 +547,7 @@ async function drawTiles(canvasCtx, offsetCoords, elementID) {
         await preloadMipmaps();
     }
     const boundedZoom = get_bounded_zoom(offsetCoords.z);
-    const scale = get_size_from_zoom(boundedZoom);
+    const scale = get_map_units_per_cell_from_zoom(boundedZoom);
 
     // Find element index in sorted list
     const index = elementIndiciesWithImages.indexOf(elementID);
@@ -576,7 +576,7 @@ async function drawTiles(canvasCtx, offsetCoords, elementID) {
     }
 
     // Determine mipmap size
-    const textureSize = scale * CELLS_PER_TILE;
+    const textureSize = scale * CELLS_PER_NATURAL_TEXTURE_TILE;
     const boundedTextureSize = Math.min(MAX_MIPMAP_SIZE, Math.max(MIN_MIPMAP_SIZE, textureSize));
     const mipmap = mipmapCanvases[boundedTextureSize];
     if (!mipmap) {
@@ -591,9 +591,9 @@ async function drawTiles(canvasCtx, offsetCoords, elementID) {
     const srcY = Math.floor(index / texturesPerRow) * textureSize;
 
     // Get the sub-tile location within that tile
-    const tileSize = BASE_SIZE;
-    const tileIndexX = offsetCoords.x % CELLS_PER_TILE;
-    const tileIndexY = offsetCoords.y % CELLS_PER_TILE;
+    const tileSize = ZOOM_0_CELLS_PER_MAP_UNIT;
+    const tileIndexX = offsetCoords.x % CELLS_PER_NATURAL_TEXTURE_TILE;
+    const tileIndexY = offsetCoords.y % CELLS_PER_NATURAL_TEXTURE_TILE;
     const subTileX = srcX + tileIndexX * scale;
     const subTileY = srcY + tileIndexY * scale; // (CELLS_PER_TILE - 1 - tileIndexY) * scale; // Flip y
 
@@ -610,9 +610,9 @@ const imageCache = new Map();
 async function preloadTiles() {
   // Cache images from elementIndiciesWithImages
   for (const elementId of elementIndiciesWithImages) {
-    for (let x = 0; x < CELLS_PER_TILE; x++) {
-      for (let y = 0; y < CELLS_PER_TILE; y++) {
-        for (let z = 0; z < get_zoom_from_size(40); z++) {
+    for (let x = 0; x < CELLS_PER_NATURAL_TEXTURE_TILE; x++) {
+      for (let y = 0; y < CELLS_PER_NATURAL_TEXTURE_TILE; y++) {
+        for (let z = 0; z < get_zoom_from_map_units_per_cell(40); z++) {
           const url = getOffsetTileUrl({ x, y, z: 0 }, elementId);
           loadImage(url);
         } 
@@ -641,11 +641,13 @@ function loadImage(url) {
     });
 }
 
-const BASE_ZOOM = 10; // Base zoom level for the map
-const BASE_SIZE = 512; // Base tile size for the map
-const CELLS_PER_TILE = 8; // Number of cells per texture tile, lengthwise
-const MAX_SIZE_PER_CELL = 128; // Maximum size per cell
-const MAX_LOSSLESS_ZOOM = get_zoom_from_size(MAX_SIZE_PER_CELL); // Maximum zoom level for lossless tiles
+// TODO: typescript define classes for map units, zoom 0 map tiles (256 map units), cells, display pixels, natural texture tiles, natural texture pixels
+const ZOOM_0_CELLS_PER_MAP_UNIT = 8; // Base tile size for the map - this is purposefully not 1 to make sure code accounts for this!!
+const MAP_UNITS_PER_ZOOM_0_MAP_TILE = 256; // Leaflet default
+const ZOOM_0_CELLS_PER_ZOOM_0_MAP_TILE = ZOOM_0_CELLS_PER_MAP_UNIT * MAP_UNITS_PER_ZOOM_0_MAP_TILE; // Make sure dimensional analysis checks out!!
+const CELLS_PER_NATURAL_TEXTURE_TILE = 8; // Number of cells per texture tile, lengthwise
+const MAX_LOSSLESS_MAP_UNITS_PER_CELL = 128; // Maximum size per cell
+const MAX_LOSSLESS_ZOOM = get_zoom_from_map_units_per_cell(MAX_LOSSLESS_MAP_UNITS_PER_CELL); // Maximum zoom level for lossless tiles
 
 // Function to get tile URL using preloaded image data
 function getTileUrl(coords) {
@@ -653,39 +655,34 @@ function getTileUrl(coords) {
     const x = coords.x;
     const y = coords.y;
     const zoom = coords.z;
-    //const absolute_x = zoom > BASE_ZOOM ? Math.floor(x/(2**(zoom-BASE_ZOOM))) : Math.floor(x/(2**(0)));
-    //const absolute_y = zoom > BASE_ZOOM ? Math.floor(y/(2**(zoom-BASE_ZOOM))) : Math.floor(y/(2**(0)));
-    // const size = zoom > BASE_ZOOM ? BASE_SIZE : BASE_SIZE * (2**(zoom-BASE_ZOOM));
     const absolute_x = x;
     const absolute_y = y;
-    const size = get_size_from_zoom(zoom);
-    //console.log("coords", absolute_x, absolute_y, "size", size, "raw", coords);
+    const size = get_map_units_per_cell_from_zoom(zoom);
 
     const pixelValue = getPixelValue(absolute_x, absolute_y);
     if (pixelValue === null) return null;
 
-    //console.log("elementIndiciesWithImages", elementIndiciesWithImages);
     if (elementIndiciesWithImages.includes(pixelValue)) {
-        return `/tiles_cut/${Math.min(size, MAX_SIZE_PER_CELL)}/${pixelValue}/${absolute_x%CELLS_PER_TILE}-${CELLS_PER_TILE-1-(absolute_y)%CELLS_PER_TILE}.png`; // TODO: y-coordinate up or down?
+        return `/tiles_cut/${Math.min(size, MAX_LOSSLESS_MAP_UNITS_PER_CELL)}/${pixelValue}/${absolute_x%CELLS_PER_NATURAL_TEXTURE_TILE}-${CELLS_PER_NATURAL_TEXTURE_TILE-1-(absolute_y)%CELLS_PER_NATURAL_TEXTURE_TILE}.png`; // TODO: y-coordinate up or down?
     }
     const colorHex = getColorHexById(pixelValue);
     return `/hex_colors_32/${colorHex}.png`;
 }
 
-function get_size_from_zoom(zoom) {
-  return BASE_SIZE * (2**(zoom-BASE_ZOOM));
+function get_map_units_per_cell_from_zoom(zoom) {
+  return 2 ** zoom;
 }
 
-function get_xy_scale_from_zoom(zoom) {
-  return 2 ** (BASE_ZOOM - zoom);
+function get_cells_per_zoom_0_map_tile_from_zoom(zoom) {
+  return ZOOM_0_CELLS_PER_ZOOM_0_MAP_TILE / get_map_units_per_cell_from_zoom(zoom);
 }
 
 function get_bounded_zoom(zoom) {
   return Math.min(MAX_LOSSLESS_ZOOM, zoom);
 }
 
-function get_zoom_from_size(size) {
-  return Math.log2(size / BASE_SIZE) + BASE_ZOOM;
+function get_zoom_from_map_units_per_cell(size) {
+  return Math.log2(size);
 }
 
 function getOffsetTileUrl(coords, elementId) {
@@ -698,41 +695,28 @@ function getOffsetTileUrl(coords, elementId) {
     // const size = zoom > BASE_ZOOM ? BASE_SIZE : BASE_SIZE * (2**(zoom-BASE_ZOOM));
     const absolute_x = x;
     const absolute_y = y;
-    const size = get_size_from_zoom(zoom);
+    const size = get_map_units_per_cell_from_zoom(zoom);
     //console.log("coords", absolute_x, absolute_y, "size", size, "raw", coords);
 
     //console.log("elementIndiciesWithImages", elementIndiciesWithImages);
     if (elementIndiciesWithImages.includes(elementId)) {
-        return `/tiles_cut/${Math.min(size, MAX_SIZE_PER_CELL)}/${elementId}/${absolute_x%CELLS_PER_TILE}-${CELLS_PER_TILE-1-(absolute_y)%CELLS_PER_TILE}.png`; // TODO: y-coordinate up or down?
+        return `/tiles_cut/${Math.min(size, MAX_LOSSLESS_MAP_UNITS_PER_CELL)}/${elementId}/${absolute_x%CELLS_PER_NATURAL_TEXTURE_TILE}-${CELLS_PER_NATURAL_TEXTURE_TILE-1-(absolute_y)%CELLS_PER_NATURAL_TEXTURE_TILE}.png`; // TODO: y-coordinate up or down?
     }
     const colorHex = getColorHexById(elementId);
     return `/hex_colors_32/${colorHex}.png`;
 }
 
-// Initialize map after image data is loaded
-async function initializeMap() {
+const map = ref(null);
+const webGLCanvas = ref(null); // Store single WebGL2CanvasManager instance
+const numCellsWorldWidth = ref(0);
+const numCellsWorldHeight = ref(0);
 
-  initialMap.value = L.map('map').setView([100, 100], BASE_ZOOM);
-
-L.GridLayer.MyCanvasLayer = L.GridLayer.extend({
-    createTile: function (coords, done) {
-      const webGLCanvas = new WebGL2CanvasManager(300, 300);
-      function getRandomInt(min, max) {
-        const min_int = Math.ceil(min);
-        const max_int = Math.floor(max);
-        const random = Math.floor(Math.random() * (max_int - min_int + 1)) + min_int;
-        console.log(random);
-        return random;
-      }
+const initializeWebGL = () => {
+  return new Promise((resolve) => {
+    if (!webGLCanvas.value) {
+      webGLCanvas.value = new WebGL2CanvasManager(300, 300);
 
       const NATURAL_TILES_TEXTURE_SIZE = 1024;
-
-      const scale = 10;
-      const width = getRandomInt(636 / scale, 636 * 2 / scale);
-      const height = getRandomInt(404 / scale, 404 * 2 / scale);
-      //const x_offset = getRandomInt(20, 30);
-      //const y_offset = getRandomInt(20, 30);
-
       let image_urls = [
         "/elementIdx8.png",
         "/temperature32.png",
@@ -743,78 +727,130 @@ L.GridLayer.MyCanvasLayer = L.GridLayer.extend({
       for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
         image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
       }
-      const callback = () => {
-        console.log("render tile callback");
-        ctx.drawImage(webGLCanvas.canvas, 0, 0, size.x, size.y);
-        // console.log(webGLCanvas.getImage());
-        done(null, tile);
-      };
 
-      var tile = document.createElement('canvas');
-      var size = this.getTileSize();
-      tile.width = size.x;
-      tile.height = size.y;
-      var ctx = tile.getContext('2d');
+      // Load images and resolve Promise when setup is done
+      loadImages(image_urls, (images) => {
+        numCellsWorldWidth.value = images[0].width;
+        numCellsWorldHeight.value = images[0].height;
 
-      const canvas_size = get_size_from_zoom(coords.z);
-      const xy_scale = get_xy_scale_from_zoom(coords.z);
-      const x_offset = -1 * coords.x * xy_scale;
-      const y_offset = -1 * coords.y * xy_scale;
-      console.log("xyz", coords, canvas_size, xy_scale, x_offset, y_offset);
-      //loadImages(image_urls, (images) => webGLCanvas.render(images, width, height, x_offset, y_offset, 636 * 2, 404 * 2, callback));
-      console.log("params", xy_scale, xy_scale, x_offset, y_offset, size.x, size.y)
-      loadImages(image_urls, (images) => webGLCanvas.render(images, xy_scale, xy_scale, x_offset, y_offset, size.x, size.y, callback));
-
-
-        if (coords.z < BASE_ZOOM) {
-            this.options.tileSize = BASE_SIZE;
-            console.log("a - creating zoomed tile");
-            console.log(webGLCanvas.getImage());
-          ctx.drawImage(webGLCanvas.canvas, 0, 0, size.x, size.y);
-            /*
-            createZoomedTile(coords, BASE_SIZE, BASE_ZOOM).then(canvas => {
-                ctx.drawImage(canvas, 0, 0, size.x, size.y);
-                done(null, tile);
-            }).catch(err => {
-                console.error("Error creating zoomed tile:", err);
-                done(err, tile);
-            });
-            */
-        } else {
-            this.options.tileSize = BASE_SIZE * (2**(coords.z - BASE_ZOOM));
-            console.log("b - fetching tile");
-            var img = new Image();
-            img.crossOrigin = "Anonymous"; // Avoid CORS issues if necessary
-            img.onload = function () {
-                ctx.drawImage(img, 0, 0, size.x, size.y);
-                done(null, tile);
-            };
-            img.onerror = function (err) {
-                console.error("Tile load error", err);
-                done(err, tile);
-            };
-            img.src = getTileUrl(coords);
-        }
-
-        return tile;
+        webGLCanvas.value.setup(images, () => {
+          console.log("WebGL Setup Completed");
+          resolve(); // ✅ Ensure the promise resolves after setup
+        });
+      });
+    } else {
+      resolve(); // If already initialized, resolve immediately
     }
-});
-
-// Static factory function
-L.gridLayer.myCanvasLayer = function (options) {
-    return new L.GridLayer.MyCanvasLayer(options);
+  });
 };
 
-// Add the custom canvas layer to the map
-L.gridLayer.myCanvasLayer({
-    minZoom: 0,
-    maxZoom: MAX_LOSSLESS_ZOOM,
-    tileSize: BASE_SIZE,
-    continuousWorld: false,
-    noWrap: true,
-    crs: L.CRS.Simple,
-    worldCopyJump: false
-}).addTo(initialMap.value);
+const drawDebugInfo = (ctx, coords, width, height) => {
+  // 🟥 Draw white outline for the border
+  ctx.strokeStyle = "white";
+  ctx.lineWidth = 6;
+  ctx.strokeRect(0, 0, width, height);
+
+  // 🟥 Draw red border over the white outline
+  ctx.strokeStyle = "red";
+  ctx.lineWidth = 4;
+  ctx.strokeRect(0, 0, width, height);
+
+  // 🖍️ Set up font properties
+  ctx.font = "bold 16px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  // 🏳️ White outline for tile coordinates text
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = "white";
+  ctx.strokeText(`(${coords.x}, ${coords.y}, ${coords.z})`, width / 2, height / 2 - 10);
+
+  // 🟥 Red text for tile coordinates
+  ctx.fillStyle = "red";
+  ctx.fillText(`(${coords.x}, ${coords.y}, ${coords.z})`, width / 2, height / 2 - 10);
+
+  // 🏳️ White outline for tile size text (placed slightly below the coordinates)
+  ctx.strokeStyle = "white";
+  ctx.strokeText(`${width} × ${height} px`, width / 2, height / 2 + 10);
+
+  // 🟥 Red text for tile size
+  ctx.fillStyle = "red";
+  ctx.fillText(`${width} × ${height} px`, width / 2, height / 2 + 10);
+};
+
+
+
+
+const initializeMap = () => {
+  if (!map.value) {
+    const worldCenterX = numCellsWorldWidth.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
+    const worldCenterY = -numCellsWorldHeight.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
+    const worldCenterLatLong = [worldCenterY, worldCenterX];
+    console.log(worldCenterLatLong, "worldCenterLatLong");
+
+    map.value = L.map("map", {
+      crs: L.CRS.Simple,
+    }).setView(worldCenterLatLong, 4);
+
+
+    L.GridLayer.MyCanvasLayer = L.GridLayer.extend({
+      createTile: function (coords, done) {
+        if (!webGLCanvas.value) {
+          console.error("WebGL2CanvasManager is not initialized");
+          return;
+        }
+
+        var tile = document.createElement("canvas");
+        var size = this.getTileSize();
+        tile.width = size.x;
+        tile.height = size.y;
+        var ctx = tile.getContext("2d");
+
+        const canvas_size = get_map_units_per_cell_from_zoom(coords.z);
+        const xy_scale = get_cells_per_zoom_0_map_tile_from_zoom(coords.z);
+        const x_offset = -1 * coords.x * xy_scale;
+        const y_offset = (coords.y + 1) * xy_scale - numCellsWorldHeight.value;
+
+
+
+        console.log("xyz", coords, canvas_size, xy_scale, x_offset, y_offset);
+
+        const callback = () => {
+          console.log("Render Tile Callback");
+          ctx.drawImage(webGLCanvas.value.canvas, 0, 0, size.x, size.y);
+
+          const debugMode = true;
+
+          if (debugMode) {
+            drawDebugInfo(ctx, coords, size.x, size.y);
+          }
+
+          done(null, tile);
+        };
+
+        // ✅ Wait for WebGL setup before rendering
+        initializeWebGL().then(() => {
+          webGLCanvas.value.render(
+              numCellsWorldWidth.value,
+              numCellsWorldHeight.value,
+              xy_scale, xy_scale,
+              x_offset, y_offset,
+              size.x, size.y,
+              callback
+          );
+        });
+
+        return tile;
+      },
+    });
+
+    L.gridLayer.myCanvasLayer = function (opts) {
+      return new L.GridLayer.MyCanvasLayer(opts);
+    };
+
+    L.gridLayer.myCanvasLayer().addTo(map.value);
+  }
+
 
 let bounds = [[0, 0], [imageWidth, imageHeight]];
 //initialMap.value.setMaxBounds(bounds); // TODO: change?
@@ -873,6 +909,7 @@ async function initializeApp() {
     await loadValidElementIdxImages(); // Preload valid element idx images
     await loadImageData(); // Ensure image data is loaded first
     // await preloadMipmaps(); // Preload mipmaps
+    await initializeWebGL();
     await initializeMap(); // Then initialize the map
     const testZoom = 5;
     const startTime = performance.now();
@@ -889,9 +926,6 @@ async function initializeApp() {
                   */
     lowPriorityTasks();
 }
-
-// Start the application
-initializeApp();
 
 
 
@@ -961,6 +995,9 @@ onMounted(() => {
       defaultRadius:1,
   }).addTo(initialMap.value);
 */
+
+// Start the application
+  initializeApp();
   
 })
 </script>
