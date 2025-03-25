@@ -18,6 +18,8 @@ import { useUserStore } from '@/stores';
 import "leaflet/dist/leaflet.css"
 import * as L from 'leaflet';
 
+import WebGL2CanvasManager from "@/components/WebGL2_ts.js";
+import {loadImages} from "@/components/LoadImage.js"; // Import the class
 /*
 async function getColorHexById(idx) {
     const response = await fetch('/elements.json');
@@ -415,8 +417,8 @@ async function createZoomedTile({ x, y, z }, BASE_SIZE, BASE_ZOOM) {
     DISABLE_MEASURE_ZOOMED_TILE_TIME ? null : console.log("start createZoomedTile");
 
     const scale = get_size_from_zoom(z);
-    const gridSize = 2 ** (BASE_ZOOM - z) + 1;
-    const boundarySize = 2 ** (BASE_ZOOM - z);
+    const gridSize = get_xy_scale_from_zoom(z) + 1;
+    const boundarySize = get_xy_scale_from_zoom(z);
 
     // Offscreen canvas for final output
     const offCanvas = document.createElement('canvas');
@@ -674,6 +676,10 @@ function get_size_from_zoom(zoom) {
   return BASE_SIZE * (2**(zoom-BASE_ZOOM));
 }
 
+function get_xy_scale_from_zoom(zoom) {
+  return 2 ** (BASE_ZOOM - zoom);
+}
+
 function get_bounded_zoom(zoom) {
   return Math.min(MAX_LOSSLESS_ZOOM, zoom);
 }
@@ -706,19 +712,66 @@ function getOffsetTileUrl(coords, elementId) {
 // Initialize map after image data is loaded
 async function initializeMap() {
 
-  initialMap.value = L.map('map').setView([0, 0], BASE_ZOOM);
+  initialMap.value = L.map('map').setView([100, 100], BASE_ZOOM);
 
 L.GridLayer.MyCanvasLayer = L.GridLayer.extend({
     createTile: function (coords, done) {
-        var tile = document.createElement('canvas');
-        var size = this.getTileSize();
-        tile.width = size.x;
-        tile.height = size.y;
-        var ctx = tile.getContext('2d');
+      const webGLCanvas = new WebGL2CanvasManager(300, 300);
+      function getRandomInt(min, max) {
+        const min_int = Math.ceil(min);
+        const max_int = Math.floor(max);
+        const random = Math.floor(Math.random() * (max_int - min_int + 1)) + min_int;
+        console.log(random);
+        return random;
+      }
+
+      const NATURAL_TILES_TEXTURE_SIZE = 1024;
+
+      const scale = 10;
+      const width = getRandomInt(636 / scale, 636 * 2 / scale);
+      const height = getRandomInt(404 / scale, 404 * 2 / scale);
+      //const x_offset = getRandomInt(20, 30);
+      //const y_offset = getRandomInt(20, 30);
+
+      let image_urls = [
+        "/elementIdx8.png",
+        "/temperature32.png",
+        "/mass32.png",
+        "/element_data_1x1.png"
+      ];
+
+      for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
+        image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
+      }
+      const callback = () => {
+        console.log("render tile callback");
+        ctx.drawImage(webGLCanvas.canvas, 0, 0, size.x, size.y);
+        // console.log(webGLCanvas.getImage());
+        done(null, tile);
+      };
+
+      var tile = document.createElement('canvas');
+      var size = this.getTileSize();
+      tile.width = size.x;
+      tile.height = size.y;
+      var ctx = tile.getContext('2d');
+
+      const canvas_size = get_size_from_zoom(coords.z);
+      const xy_scale = get_xy_scale_from_zoom(coords.z);
+      const x_offset = -1 * coords.x * xy_scale;
+      const y_offset = -1 * coords.y * xy_scale;
+      console.log("xyz", coords, canvas_size, xy_scale, x_offset, y_offset);
+      //loadImages(image_urls, (images) => webGLCanvas.render(images, width, height, x_offset, y_offset, 636 * 2, 404 * 2, callback));
+      console.log("params", xy_scale, xy_scale, x_offset, y_offset, size.x, size.y)
+      loadImages(image_urls, (images) => webGLCanvas.render(images, xy_scale, xy_scale, x_offset, y_offset, size.x, size.y, callback));
+
 
         if (coords.z < BASE_ZOOM) {
             this.options.tileSize = BASE_SIZE;
             console.log("a - creating zoomed tile");
+            console.log(webGLCanvas.getImage());
+          ctx.drawImage(webGLCanvas.canvas, 0, 0, size.x, size.y);
+            /*
             createZoomedTile(coords, BASE_SIZE, BASE_ZOOM).then(canvas => {
                 ctx.drawImage(canvas, 0, 0, size.x, size.y);
                 done(null, tile);
@@ -726,6 +779,7 @@ L.GridLayer.MyCanvasLayer = L.GridLayer.extend({
                 console.error("Error creating zoomed tile:", err);
                 done(err, tile);
             });
+            */
         } else {
             this.options.tileSize = BASE_SIZE * (2**(coords.z - BASE_ZOOM));
             console.log("b - fetching tile");
@@ -818,10 +872,11 @@ async function initializeApp() {
     await loadColorData(); // Preload color mappings
     await loadValidElementIdxImages(); // Preload valid element idx images
     await loadImageData(); // Ensure image data is loaded first
-    await preloadMipmaps(); // Preload mipmaps
+    // await preloadMipmaps(); // Preload mipmaps
     await initializeMap(); // Then initialize the map
     const testZoom = 5;
     const startTime = performance.now();
+    /*
     console.log(createZoomedTile({x : Math.floor(330*2**(testZoom-BASE_ZOOM)), y : Math.floor(300*2**(testZoom-BASE_ZOOM)), z : testZoom}, BASE_SIZE, BASE_ZOOM).then(canvas => {
       console.log("createZoomedTile");
       console.log(canvas);
@@ -831,6 +886,7 @@ async function initializeApp() {
                   const endTime = performance.now();
                   const executionTime = endTime - startTime;
                   console.log(`Execution time: ${executionTime} milliseconds`);
+                  */
     lowPriorityTasks();
 }
 

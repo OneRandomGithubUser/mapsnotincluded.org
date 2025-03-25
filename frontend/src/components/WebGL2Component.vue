@@ -48,10 +48,19 @@
             const NATURAL_TILES_TEXTURE_SIZE = 1024;
 
             const scale = 10;
-            const width = getRandomInt(636 / scale, 636 * 2 / scale);
-            const height = getRandomInt(404 / scale, 404 * 2 / scale);
-            const x_offset = getRandomInt(20, 30);
-            const y_offset = getRandomInt(20, 30); 
+            //const width = getRandomInt(636 / scale, 636 * 2 / scale);
+            //const height = getRandomInt(404 / scale, 404 * 2 / scale);
+            //const x_offset = getRandomInt(20, 30);
+            //const y_offset = getRandomInt(20, 30);
+            //const canvas_width = 636 * 2;
+            //const canvas_height = 404 * 2;
+
+            const width = 4;
+            const height = 4;
+            const x_offset = -128;
+            const y_offset = -128;
+            const canvas_width = 512;
+            const canvas_height = 512;
 
             let image_urls = [
                 "/elementIdx8.png",
@@ -64,7 +73,7 @@
               image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
             }
 
-            loadImages(image_urls, (images) => canvas_manager.render(images, width, height, x_offset, y_offset, 636 * 2, 404 * 2));
+            loadImages(image_urls, (images) => canvas_manager.setup(images, () => {canvas_manager.render(images, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");})}));
           //canvases.value[id].setRectangle(50, 50, 100, 100);
         }
       };
