@@ -181,6 +181,9 @@ class TextureAtlasMipmapArray {
     getNumTextureLayers() {
         return this.depth;
     }
+    getMipmapLevel(index) {
+        return this.imageMipmaps[index];
+    }
 }
 class TextureArrayMipmapArray {
     constructor(imageMipmaps) {
@@ -207,6 +210,9 @@ class TextureArrayMipmapArray {
     }
     getNumTextureLayers() {
         return this.depth;
+    }
+    getMipmapLevel(index) {
+        return this.imageMipmaps[index];
     }
 }
 export default class WebGL2CanvasManager {
@@ -795,8 +801,8 @@ void main() {
             throw new Error("negative mipmaps provided");
         }
         for (let mipmapLevel = 0; mipmapLevel < numProvidedMipmaps; mipmapLevel++) {
-            const sourceimageArrayOrAtlasOrMipmap = (imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray)
-                ? imageArrayOrAtlasOrMipmap.imageMipmaps[mipmapLevel]
+            const sourceimageArrayOrAtlasOrMipmap = (imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) // TextureLevelMipmapArray
+                ? imageArrayOrAtlasOrMipmap.getMipmapLevel(mipmapLevel)
                 : imageArrayOrAtlasOrMipmap;
             // Upload each image as a separate layer in the texture array
             for (let i = 0; i < depth; i++) {
@@ -818,11 +824,11 @@ void main() {
     setupTextureArray(imageArrayOrAtlasOrMipmap, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, flipTexturesY) {
         // Create and setup a texture array
         const textureArray = this.createAndSetupTextureArray(usePixelArtSettings);
-        const largestImageArrayOrAtlas = (imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray)
-            ? imageArrayOrAtlasOrMipmap.imageMipmaps[0]
+        const largestImageArrayOrAtlas = (imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) // TextureLevelMipmapArray
+            ? imageArrayOrAtlasOrMipmap.getMipmapLevel(0)
             : imageArrayOrAtlasOrMipmap;
-        const numProvidedMipmaps = (imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray)
-            ? imageArrayOrAtlasOrMipmap.imageMipmaps.length
+        const numProvidedMipmaps = (imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) // TextureLevelMipmapArray
+            ? imageArrayOrAtlasOrMipmap.getNumProvidedMipmaps()
             : 1;
         this.allocateTextureArrayStorage(textureArray, largestImageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, numProvidedMipmaps);
         this.uploadTextureArray(textureArray, imageArrayOrAtlasOrMipmap, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, flipTexturesY, numProvidedMipmaps);
