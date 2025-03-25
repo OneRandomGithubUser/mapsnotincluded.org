@@ -1,4 +1,4 @@
-# Install npm
+# Install npm, or update it if it's already installed
 winget install -e --id OpenJS.NodeJS
 
 # Reload the Powershell window to allow npm to run
