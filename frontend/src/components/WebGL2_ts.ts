@@ -298,10 +298,13 @@ class TextureArrayMipmapArray implements TextureLevelMipmapArray {
 }
 export default class WebGL2CanvasManager {
     private canvas: HTMLCanvasElement;
-    private gl: WebGL2RenderingContext;
-    private program: WebGLProgram;
-    private vertexShader: WebGLShader;
-    private fragmentShader: WebGLShader
+    private readonly gl: WebGL2RenderingContext;
+    private readonly program: WebGLProgram;
+    private readonly vertexShader: WebGLShader;
+    private readonly fragmentShader: WebGLShader;
+    private readonly positionBuffer : WebGLBuffer;
+    private readonly NATURAL_TILES_TEXTURE_SIZE : number;
+    private readonly RESOLUTION_LOCATION_NAME : string;
     constructor(width = 300, height = 300) {
         // Get A WebGL context
         this.canvas = document.createElement("canvas");
@@ -322,41 +325,22 @@ export default class WebGL2CanvasManager {
         this.program = shaders.program;
         this.vertexShader = shaders.vertexShader;
         this.fragmentShader = shaders.fragmentShader;
+
+        this.positionBuffer = this.setupPositionBuffer("a_position", 0, 0, 1, 1);
+
+        this.NATURAL_TILES_TEXTURE_SIZE = 1024;
+        this.RESOLUTION_LOCATION_NAME = "u_resolution";
     }
     setup(
         images: HTMLImageElement[],
         callback: () => {}
     ) : void {
-        callback();
-    }
-    render(
-        images: HTMLImageElement[],
-        num_cells_width: number,
-        num_cells_height: number,
-        num_cells_left_edge_x: number,
-        num_cells_bottom_edge_y: number,
-        canvas_width: number,
-        canvas_height: number,
-        callback: () => {}
-    ) {
         // TODO: lazy texture loading with large images
         const gl = this.gl;
-
-        this.resizeCanvas(canvas_width, canvas_height);
 
         const vertexShader = this.vertexShader;
         const fragmentShader = this.fragmentShader;
 
-        // Set a rectangle the same size as the image.
-        // NOTE: assumes that the world data images are the same size and are the same size as the world
-        const numCellsWorldWidth = images[0].width;
-        const numCellsWorldHeight = images[0].height;
-        const num_pixels_world_width = canvas_width / num_cells_width * numCellsWorldWidth;
-        const num_pixels_world_height = canvas_height / num_cells_height * numCellsWorldHeight;
-        const num_pixels_num_cells_left_edge_x = canvas_width / num_cells_width * num_cells_left_edge_x;
-        const num_pixels_num_cells_bottom_edge_y = canvas_width / num_cells_width * num_cells_bottom_edge_y;
-
-        const positionBuffer = this.setupPositionBuffer("a_position", num_pixels_num_cells_left_edge_x, num_pixels_num_cells_bottom_edge_y, num_pixels_world_width, num_pixels_world_height);
         const texCoordBuffer = this.setupTextureBuffers("a_texCoord");
         //this.setRectangle(positionBuffer, num_pixels_num_cells_left_edge_x, num_pixels_num_cells_bottom_edge_y, num_pixels_world_width, num_pixels_world_height);
 
@@ -387,15 +371,14 @@ export default class WebGL2CanvasManager {
         const naturalTilesImageAtlas = images.slice(4, 15);
         let naturalTilesImageAtlasTemp : TextureAtlas[] = []; // TODO: remove temp
         const getNaturalTileAtlasBounds = (layerIndex: number, mipmapIndex: number) => {
-            const textureSize = NATURAL_TILES_TEXTURE_SIZE / (2 ** mipmapIndex);
+            const textureSize = this.NATURAL_TILES_TEXTURE_SIZE / (2 ** mipmapIndex);
             return { x: layerIndex * textureSize, y: 0, width: textureSize, height: textureSize };
         };
-        const NATURAL_TILES_TEXTURE_SIZE = 1024;
         for (let i = 0; i < naturalTilesImageAtlas.length; i++) {
             naturalTilesImageAtlasTemp.push(new TextureAtlas(
                 naturalTilesImageAtlas[i],
                 getNaturalTileAtlasBounds,
-                naturalTilesImageAtlas[0].width/NATURAL_TILES_TEXTURE_SIZE
+                naturalTilesImageAtlas[0].width/this.NATURAL_TILES_TEXTURE_SIZE
             ));
         }
         const naturalTilesImageAtlasWrapper = new TextureAtlasMipmapArray(naturalTilesImageAtlasTemp);
@@ -403,17 +386,8 @@ export default class WebGL2CanvasManager {
         //const naturalTilesTextureArray = this.setupTextureArray(images[4], false, false, false);
         const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlasWrapper, false, true);
 
-        // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
-
-        this.resetCanvasState();
-
         // Tell it to use our program (pair of shaders)
         gl.useProgram(this.program);
-
-        const RESOLUTION_LOCATION_NAME = "u_resolution";
-
-        // Pass in the canvas resolution so we can convert from pixels to clip space in the shader
-        this.bind2UniformFloatsToUnit(gl.canvas.width, gl.canvas.height, RESOLUTION_LOCATION_NAME);
 
         this.bindTextureToUnit(worldDataTextures[0], images[0], "u_world_data_image_elementIdx8", 0);
         // TODO: readd if necessary
@@ -424,6 +398,48 @@ export default class WebGL2CanvasManager {
         this.bindTextureArrayToUnit(elementDataTextureArray, "u_element_data_image_array", 4);
         this.bindTextureArrayToUnit(naturalTilesTextureArray, "u_natural_tile_image_array", 5);
 
+        callback();
+    }
+    render(
+        numCellsWorldWidth: number,
+        numCellsWorldHeight: number,
+        num_cells_width: number,
+        num_cells_height: number,
+        num_cells_left_edge_x: number,
+        num_cells_bottom_edge_y: number,
+        canvas_width: number,
+        canvas_height: number,
+        callback: () => {}
+    ) {
+        const gl = this.gl;
+
+        this.resizeCanvas(canvas_width, canvas_height);
+
+        // Set a rectangle the same size as the image.
+        // NOTE: assumes that the world data images are the same size and are the same size as the world
+        const num_pixels_world_width = canvas_width / num_cells_width * numCellsWorldWidth;
+        const num_pixels_world_height = canvas_height / num_cells_height * numCellsWorldHeight;
+        const num_pixels_num_cells_left_edge_x = canvas_width / num_cells_width * num_cells_left_edge_x;
+        const num_pixels_num_cells_bottom_edge_y = canvas_width / num_cells_width * num_cells_bottom_edge_y;
+
+        this.updatePositionBuffer(
+            this.positionBuffer,
+            num_pixels_num_cells_left_edge_x,
+            num_pixels_num_cells_bottom_edge_y,
+            num_pixels_world_width,
+            num_pixels_world_height
+        );
+
+        // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
+
+        this.resetCanvasState();
+
+        // Tell it to use our program (pair of shaders)
+        gl.useProgram(this.program);
+
+        // Pass in the canvas resolution so we can convert from pixels to clip space in the shader
+        this.bind2UniformFloatsToUnit(gl.canvas.width, gl.canvas.height, this.RESOLUTION_LOCATION_NAME);
+
         const NATURAL_TEXTURE_TILES_PER_CELL_X = 1 / 8;
         const NATURAL_TEXTURE_TILES_PER_CELL_Y = 1 / 8;
         const lodLevel = this.computeLodLevel(num_cells_width, num_cells_height, NATURAL_TEXTURE_TILES_PER_CELL_X, NATURAL_TEXTURE_TILES_PER_CELL_Y);
@@ -431,7 +447,7 @@ export default class WebGL2CanvasManager {
         this.bind2UniformFloatsToUnit(NATURAL_TEXTURE_TILES_PER_CELL_X, NATURAL_TEXTURE_TILES_PER_CELL_Y, "u_natural_texture_tiles_per_cell");
 
         // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
-        this.setFramebuffer(null, gl.canvas.width, gl.canvas.height, RESOLUTION_LOCATION_NAME);
+        this.setFramebuffer(null, gl.canvas.width, gl.canvas.height, this.RESOLUTION_LOCATION_NAME);
 
         this.drawScene();
 
@@ -754,6 +770,39 @@ void main() {
 
         return positionBuffer;
     }
+
+    updatePositionBuffer(
+        positionBuffer: WebGLBuffer,
+        x: number,
+        y: number,
+        width: number,
+        height: number
+    ): void {
+        const gl = this.gl;
+
+        // Bind the existing position buffer
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+
+        // Compute new rectangle coordinates
+        const x1 = x;
+        const x2 = x + width;
+        const y1 = y;
+        const y2 = y + height;
+
+        // Update the buffer with new positions
+        const positions = new Float32Array([
+            x1, y1,
+            x2, y1,
+            x1, y2,
+            x1, y2,
+            x2, y1,
+            x2, y2
+        ]);
+
+        // Update buffer data with new positions
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, positions);
+    }
+
 
     setupTextureBuffers(texture_location: string) : WebGLBuffer {
         const gl = this.gl;
