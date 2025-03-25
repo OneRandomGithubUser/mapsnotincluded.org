@@ -5,6 +5,7 @@
     "moduleResolution": "bundler", // Optional, helps Vite/Vue handle modern imports
     "esModuleInterop": true,       // Optional, helps default import interop
     "forceConsistentCasingInFileNames": true,
+    "strict": true,
     "skipLibCheck": true
   }
 }
