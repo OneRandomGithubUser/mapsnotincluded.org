@@ -379,7 +379,7 @@ export default class WebGL2CanvasManager {
             throw new Error("Called dummy atlas bounds.");
             return { x: 0, y: 0, width: 0, height: 0 };
         };
-        const worldEtmTextureArray = this.setupTextureArray(worldDataImagesWrapper, dummyGetAtlasBoundsForLayer, -1, true, false, false);
+        const worldEtmTextureArray = this.setupTextureArray(worldDataImagesWrapper, true, false);
 
         const elementDataImageAtlas = images[3]; // TODO: keep style consistent
         const getElementDataAtlasBounds = (layerIndex: number) => {
@@ -390,7 +390,7 @@ export default class WebGL2CanvasManager {
             getElementDataAtlasBounds,
             elementDataImageAtlas.width
         );
-        const elementDataTextureArray = this.setupTextureArray(elementDataImageAtlasWrapper, getElementDataAtlasBounds, elementDataImageAtlas.width, true, false, false);
+        const elementDataTextureArray = this.setupTextureArray(elementDataImageAtlasWrapper, true, false);
         // NOTE: assumption that the elementDataImageAtlas is a horizontal strip of 1x1 images. row 1 is the ui overlay color, row 2 is the element texture index (0-255, or invisible if there is none)
         // TODO: does this need to be a texture array?
 
@@ -410,8 +410,8 @@ export default class WebGL2CanvasManager {
         }
         const naturalTilesImageAtlasWrapper = new TextureAtlasMipmapArray(naturalTilesImageAtlasTemp);
         // TODO: rename to natural tiles everywhere
-        //const naturalTilesTextureArray = this.setupTextureArray(images[4], getNaturalTileAtlasBounds, images[4].width/NATURAL_TILES_TEXTURE_SIZE, false, false, false);
-        const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlasWrapper, getNaturalTileAtlasBounds, naturalTilesImageAtlas[0].width/NATURAL_TILES_TEXTURE_SIZE, false, true, true);
+        //const naturalTilesTextureArray = this.setupTextureArray(images[4], false, false, false);
+        const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlasWrapper, false, true);
 
         // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
 
@@ -959,88 +959,52 @@ void main() {
 
     allocateTextureArrayStorage(textureArray: WebGLTexture,
                                 imageArrayOrAtlasOrMipmap: TextureLevel,
-                                getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
-                                    x: number;
-                                    y: number;
-                                    width: number;
-                                    height: number;
-                                },
-                                atlasLength: number,
-                                usePixelArtSettings: boolean,
-                                isMipmapArray: boolean,
-                                numProvidedMipmaps: number) : void {
+                                usePixelArtSettings: boolean
+    ) : { numAllocatedMipmaps: number; } {
         const gl = this.gl;
 
 
         // Bind the texture array before allocating storage
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, textureArray);
 
-        let width: number;
-        let height: number;
-        let depth: number;
+        const width = imageArrayOrAtlasOrMipmap.getTextureWidth();
+        const height = imageArrayOrAtlasOrMipmap.getTextureHeight();
+        const depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
 
-        if (imageArrayOrAtlasOrMipmap instanceof TextureAtlas) { // Check if it's a single atlas image
-            const bounds = getAtlasBoundsForLayer(0, 0);
-            width = bounds.width;
-            height = bounds.height;
-            depth = atlasLength;
-        } else {
-            width = imageArrayOrAtlasOrMipmap.getTextureWidth();
-            height = imageArrayOrAtlasOrMipmap.getTextureHeight();
-            depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
-        }
-
-
-
-        // TODO: delete if this works
-        //const width     = !Array.isArray(imageArrayOrAtlasOrMipmap) ? getAtlasBoundsForLayer(0, 0).width     : imageArrayOrAtlasOrMipmap[0].width;
-        //const height    = isAtlas ? getAtlasBoundsForLayer(0, 0).height    : imageArrayOrAtlasOrMipmap[0].height;
-        //const depth     = isAtlas ? atlasLength                         : imageArrayOrAtlasOrMipmap.length; // Number of layers
         const max_texture_dimension = Math.max(width, height);
         const max_mipmap_levels = Math.floor(Math.log2(max_texture_dimension)) + 1;
-        if (isMipmapArray && numProvidedMipmaps !== max_mipmap_levels) {
-            throw new Error("The number of provided mipmaps must be equal to the maximum number of mipmap levels in manual mipmap uploads.");
-        }
+        const numAllocatedMipmaps = usePixelArtSettings ? 1 : max_mipmap_levels;
 
         // Allocate immutable storage for a 3D texture (TEXTURE_2D_ARRAY)
         gl.texStorage3D(
-            gl.TEXTURE_2D_ARRAY,                                // Specifies the texture type
-            usePixelArtSettings ? 1 : max_mipmap_levels,  // Number of mipmap levels (1 = no mipmaps)
-            gl.RGBA8,                                           // Internal storage format (8-bit RGBA per channel)
-            width, height, depth                                // Texture dimensions and depth (number of layers)
+            gl.TEXTURE_2D_ARRAY,    // Specifies the texture type
+            numAllocatedMipmaps,    // Number of mipmap levels (1 = no mipmaps)
+            gl.RGBA8,               // Internal storage format (8-bit RGBA per channel)
+            width, height, depth    // Texture dimensions and depth (number of layers)
         );
+
+        return {numAllocatedMipmaps};
     }
 
     uploadTextureArray(
         textureArray: WebGLTexture,
         imageArrayOrAtlasOrMipmap: TextureAtlas | TextureArray | TextureAtlasMipmapArray | TextureArrayMipmapArray,
-        getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
-            x: number;
-            y: number;
-            width: number;
-            height: number;
-        },
-        atlasLength: number,
         usePixelArtSettings: boolean,
-        isMipmapArray: boolean,
         flipTexturesY: boolean,
-        numProvidedMipmaps: number
+        numAllocatedMipmaps: number
     ) : void {
         const gl = this.gl;
 
-        const isAtlas = Array.isArray(imageArrayOrAtlasOrMipmap); // Check if it's a single atlas image
-        let _depth : number;
-        if (imageArrayOrAtlasOrMipmap instanceof TextureAtlas || imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray ) {
-            // TODO: this check should be a class method
-            _depth = atlasLength;
-        } else if (imageArrayOrAtlasOrMipmap instanceof TextureArray) {
-            _depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
-        } else if (imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) {
-            _depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers();
-        } else {
-            throw new Error("unimplemented action");
+
+        const numProvidedMipmaps =
+            (imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) // TextureLevelMipmapArray
+                ? imageArrayOrAtlasOrMipmap.getNumProvidedMipmaps()
+                : 1;
+        if ((imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) && numProvidedMipmaps !== numAllocatedMipmaps) {
+            throw new Error("The number of provided mipmaps must be equal to the maximum number of mipmap levels in manual mipmap uploads.");
         }
-        const depth = _depth; // Number of layers
+
+        const depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers(); // Number of layers
         if (depth === 0) {
             throw new Error("Cannot have empty texture source.");
         } else if (depth < 0) {
@@ -1084,22 +1048,14 @@ void main() {
                 );
             }
         }
-        if (!usePixelArtSettings && !isMipmapArray) {
+        if (!usePixelArtSettings && !(imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray)) { // TextureLevelMipmapArray
             gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
         }
     }
 
     setupTextureArray(
         imageArrayOrAtlasOrMipmap: TextureAtlas | TextureArray | TextureAtlasMipmapArray | TextureArrayMipmapArray,
-        getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
-            x: number;
-            y: number;
-            width: number;
-            height: number;
-        },
-        atlasLength: number,
         usePixelArtSettings: boolean,
-        isMipmapArray: boolean,
         flipTexturesY: boolean
     ) : WebGLTexture {
         // Create and setup a texture array
@@ -1108,12 +1064,8 @@ void main() {
             (imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) // TextureLevelMipmapArray
                 ? imageArrayOrAtlasOrMipmap.getMipmapLevel(0)
                 : imageArrayOrAtlasOrMipmap;
-        const numProvidedMipmaps =
-            (imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) // TextureLevelMipmapArray
-                ? imageArrayOrAtlasOrMipmap.getNumProvidedMipmaps()
-                : 1;
-        this.allocateTextureArrayStorage(textureArray, largestImageArrayOrAtlas, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, numProvidedMipmaps);
-        this.uploadTextureArray(textureArray, imageArrayOrAtlasOrMipmap, getAtlasBoundsForLayer, atlasLength, usePixelArtSettings, isMipmapArray, flipTexturesY, numProvidedMipmaps);
+        const { numAllocatedMipmaps } = this.allocateTextureArrayStorage(textureArray, largestImageArrayOrAtlas, usePixelArtSettings);
+        this.uploadTextureArray(textureArray, imageArrayOrAtlasOrMipmap, usePixelArtSettings, flipTexturesY, numAllocatedMipmaps);
         return textureArray;
     }
 
