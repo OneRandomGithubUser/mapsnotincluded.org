@@ -43,16 +43,6 @@ interface TextureLevelMipmapArray {
     getNumTextureLayers() : number;
 }
 
-/*
-getAtlasBoundsForLayer: (layerIndex: number, mipmapIndex: number) => {
-            x: number;
-            y: number;
-            width: number;
-            height: number;
-        },
-        atlasLength: number,
-
- */
 class TextureArrayCreationSettings {
     // TODO
     private usePixelArtSettings: boolean;
