@@ -11,12 +11,12 @@ function getCanvasImageSourceDims(
 } {
 
     if (
-        source instanceof HTMLImageElement ||
-        source instanceof HTMLCanvasElement ||
-        source instanceof HTMLVideoElement ||
-        source instanceof ImageData ||
-        (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas ||
-            source instanceof ImageBitmap)
+        (typeof HTMLImageElement !== "undefined" && source instanceof HTMLImageElement) ||
+        (typeof HTMLCanvasElement !== "undefined" && source instanceof HTMLCanvasElement) ||
+        (typeof HTMLVideoElement !== "undefined" && source instanceof HTMLVideoElement) ||
+        (typeof ImageData !== "undefined" && source instanceof ImageData) ||
+        (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) ||
+        (typeof ImageBitmap !== "undefined" && source instanceof ImageBitmap)
     ) {
         const width: number = source.width;
         const height: number = source.height;
@@ -97,17 +97,17 @@ class TextureAtlas implements TextureLevel {
 
     private static toCanvasImageSource(source: TexImageSource): CanvasImageSource {
         if (
-            source instanceof HTMLImageElement ||
-            source instanceof HTMLCanvasElement ||
-            source instanceof HTMLVideoElement ||
-            source instanceof ImageBitmap ||
-            (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas)
+            (typeof HTMLImageElement !== "undefined" && source instanceof HTMLImageElement) ||
+            (typeof HTMLCanvasElement !== "undefined" && source instanceof HTMLCanvasElement) ||
+            (typeof HTMLVideoElement !== "undefined" && source instanceof HTMLVideoElement) ||
+            (typeof OffscreenCanvas !== "undefined" && source instanceof OffscreenCanvas) ||
+            (typeof ImageBitmap !== "undefined" && source instanceof ImageBitmap)
         ) {
             return source; // Already valid
         }
 
         // Convert ImageData
-        if (source instanceof ImageData) {
+        if (typeof ImageData !== "undefined" && source instanceof ImageData) {
             const canvas = document.createElement("canvas");
             canvas.width = source.width;
             canvas.height = source.height;
@@ -136,7 +136,7 @@ class TextureAtlas implements TextureLevel {
         layerIndex: number,
         mipmapIndex: number
     ) : {
-        sourceImage: HTMLCanvasElement,
+        sourceImage: TexImageSource,
         width: number,
         height: number
     } {
@@ -148,9 +148,7 @@ class TextureAtlas implements TextureLevel {
         const sh = bounds.height;
 
         // Create a temporary canvas to extract the subregion
-        const tempCanvas = document.createElement("canvas");
-        tempCanvas.width = sw;
-        tempCanvas.height = sh;
+        const tempCanvas = new OffscreenCanvas(sw, sh);
         const ctx = tempCanvas.getContext("2d");
         if (ctx === null) {
             throw new Error("Failed to get 2D context from temporary canvas.");
