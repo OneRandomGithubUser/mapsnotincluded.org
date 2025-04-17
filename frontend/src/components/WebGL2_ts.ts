@@ -297,7 +297,7 @@ class TextureArrayMipmapArray implements TextureLevelMipmapArray {
     }
 }
 export default class WebGL2CanvasManager {
-    private canvas: HTMLCanvasElement;
+    private canvas: OffscreenCanvas;
     private readonly gl: WebGL2RenderingContext;
     private readonly program: WebGLProgram;
     private readonly vertexShader: WebGLShader;
@@ -305,11 +305,9 @@ export default class WebGL2CanvasManager {
     private readonly positionBuffer : WebGLBuffer;
     private readonly NATURAL_TILES_TEXTURE_SIZE : number;
     private readonly RESOLUTION_LOCATION_NAME : string;
-    constructor(width = 300, height = 300) {
-        // Get A WebGL context
-        this.canvas = document.createElement("canvas");
-        this.canvas.width = width;
-        this.canvas.height = height;
+    constructor(canvas: OffscreenCanvas) {
+        // Get a WebGL context
+        this.canvas = canvas;
         const ctx = this.canvas.getContext("webgl2");
         if (!ctx) {
             console.error("WebGL2CanvasManager: WebGL2 is not supported.");
@@ -1237,12 +1235,14 @@ void main() {
         // TODO
     }
 
+    /*
     getImage() : string {
         //this.resizeCanvasToDisplaySize(this.canvas);
         return this.canvas.toDataURL();
     }
+     */
 
-    resizeCanvasToDisplaySize() : boolean { // TODO
+    resizeCanvasToDisplaySize() : boolean { // TODO not relevant for an OffscreenCanvas?
         const { width, height } = this.canvas.getBoundingClientRect();
         if (this.canvas.width !== width || this.canvas.height !== height) {
             this.canvas.width = width;

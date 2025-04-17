@@ -5,16 +5,16 @@
       <button @click="clearCanvas('canvas1')">Clear Canvas 1</button>
       <button @click="getCanvasImage('canvas1')">Get Image</button>
   
-      <div v-if="canvasImages['canvas1']">
+      <div v-if="canvases['canvas1']">
         <p>Canvas 1 Render:</p>
-        <img :src="canvasImages['canvas1']" />
+        <img :src="canvases['canvas1'].canvasImage" />
       </div>
     </div>
   </template>
   
   <script>
   import { ref } from "vue";
-  import WebGL2CanvasManager from "@/components/WebGL2_ts.js";
+  import WebGL2CanvasManager from "@/components/WebGL2_ts.ts";
   import { loadImages } from "./LoadImage";
 
 
@@ -30,16 +30,21 @@
   export default {
     setup() {
       const canvases = ref({});
-      const canvasImages = ref({});
 
       const numCellsWorldWidth = ref(0);
       const numCellsWorldHeight = ref(0);
   
       const createCanvas = (id) => {
         if (!canvases.value[id]) {
-          canvases.value[id] = new WebGL2CanvasManager(300, 300);
+          const newCanvas = new OffscreenCanvas(300, 300);
+          canvases.value[id] = {
+            canvas: newCanvas,
+            canvasManager: new WebGL2CanvasManager(newCanvas),
+            canvasImage: null,
+            blobUrl: null,
+          };
 
-          const canvas_manager = canvases.value[id];
+          const canvas_manager = canvases.value[id].canvasManager;
 
           // call loadImages with random values for width, height, x, y
 
@@ -72,7 +77,7 @@
           }
 
 
-          loadImages(image_urls, (images) => {
+          loadImages(image_urls, async (images) => {
             numCellsWorldWidth.value = images[0].width;
             numCellsWorldHeight.value = images[0].height;
             canvas_manager.setup(images, () => {canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");})})
@@ -82,7 +87,7 @@
       const drawOnCanvas = (id) => {
         if (canvases.value[id]) {
 
-            const canvas_manager = canvases.value[id];
+            const canvas_manager = canvases.value[id].canvasManager;
 
             // call loadImages with random values for width, height, x, y
 
@@ -110,13 +115,28 @@
   
       const clearCanvas = (id) => {
         if (canvases.value[id]) {
-          canvases.value[id].clearCanvas();
+          canvases.value[id].canvasManager.clearCanvas();
         }
       };
   
-      const getCanvasImage = (id) => {
+      const getCanvasImage = async (id) => {
         if (canvases.value[id]) {
-          canvasImages.value[id] = canvases.value[id].getImage();
+          const canvas = canvases.value[id].canvas;
+
+          try {
+            const blob = await canvas.convertToBlob(); // <-- native method
+            const newUrl = URL.createObjectURL(blob);
+
+            // Revoke old Blob URL if it exists
+            if (canvases.value[id].blobUrl) {
+              URL.revokeObjectURL(canvases.value[id].blobUrl);
+            }
+
+            canvases.value[id].blobUrl = newUrl;
+            canvases.value[id].canvasImage = newUrl;
+          } catch (err) {
+            console.error(`Failed to get image blob for ${id}`, err);
+          }
         }
       };
   
@@ -125,7 +145,7 @@
         drawOnCanvas,
         clearCanvas,
         getCanvasImage,
-        canvasImages,
+        canvases,
       };
     },
   };
