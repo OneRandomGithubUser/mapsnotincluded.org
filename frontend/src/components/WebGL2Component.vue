@@ -1,48 +1,98 @@
 <template>
-    <div>
-      <button @click="createCanvas('canvas1')">Create Canvas 1</button>
-      <button @click="drawOnCanvas('canvas1')">Draw on Canvas 1</button>
-      <button @click="clearCanvas('canvas1')">Clear Canvas 1</button>
-      <button @click="getCanvasImage('canvas1')">Get Image</button>
-  
-      <div v-if="canvases['canvas1']">
-        <p>Canvas 1 Render:</p>
-        <img :src="canvases['canvas1'].canvasImage" />
-      </div>
+  <div>
+    <button @click="createCanvas('canvas1')">Create Canvas 1</button>
+    <button @click="drawOnCanvas('canvas1')">Draw on Canvas 1</button>
+    <button @click="clearCanvas('canvas1')">Clear Canvas 1</button>
+    <button @click="getCanvasImage('canvas1')">Get Image</button>
+
+    <div v-if="canvases['canvas1']">
+      <p>Canvas 1 Render:</p>
+      <img :src="canvases['canvas1'].canvasImage" />
     </div>
-  </template>
-  
-  <script>
-  import { ref } from "vue";
-  import WebGL2CanvasManager from "@/components/WebGL2_ts.ts";
-  import { loadImages } from "./LoadImage";
+  </div>
+</template>
+
+<script>
+import { ref } from "vue";
+import WebGL2CanvasManager from "@/components/WebGL2_ts.ts";
+import { loadImages } from "./LoadImage";
 
 
-            function getRandomInt(min, max) {
-                const min_int = Math.ceil(min);
-                const max_int = Math.floor(max);
-                const random = Math.floor(Math.random() * (max_int - min_int + 1)) + min_int;
-                console.log(random);
-                return random;
+          function getRandomInt(min, max) {
+              const min_int = Math.ceil(min);
+              const max_int = Math.floor(max);
+              const random = Math.floor(Math.random() * (max_int - min_int + 1)) + min_int;
+              console.log(random);
+              return random;
+          }
+
+
+export default {
+  setup() {
+    const canvases = ref({});
+
+    const numCellsWorldWidth = ref(0);
+    const numCellsWorldHeight = ref(0);
+
+    const smallRender = false;
+
+    const createCanvas = (id) => {
+      if (!canvases.value[id]) {
+        const newCanvas = new OffscreenCanvas(300, 300);
+        canvases.value[id] = {
+          canvas: newCanvas,
+          canvasManager: new WebGL2CanvasManager(newCanvas),
+          canvasImage: null,
+          blobUrl: null,
+        };
+
+        const canvas_manager = canvases.value[id].canvasManager;
+
+        // call loadImages with random values for width, height, x, y
+
+        const NATURAL_TILES_TEXTURE_SIZE = 1024;
+
+        const scale = 10;
+        const { width, height, x_offset, y_offset, canvas_width, canvas_height } =
+          smallRender
+            ? {
+              width: 4,
+              height: 4,
+              x_offset: -128,
+              y_offset: -128,
+              canvas_width: 512,
+              canvas_height: 512,
             }
-  
+            : {
+              width: getRandomInt(636 / scale, 636 * 2 / scale),
+              height: getRandomInt(404 / scale, 404 * 2 / scale),
+              x_offset: getRandomInt(20, 30),
+              y_offset: getRandomInt(20, 30),
+              canvas_width: 636 * 2,
+              canvas_height: 404 * 2,
+            };
 
-  export default {
-    setup() {
-      const canvases = ref({});
+        let image_urls = [
+          "/elementIdx8.png",
+          "/temperature32.png",
+          "/mass32.png",
+          "/element_data_1x1.png"
+        ];
 
-      const numCellsWorldWidth = ref(0);
-      const numCellsWorldHeight = ref(0);
-  
-      const createCanvas = (id) => {
-        if (!canvases.value[id]) {
-          const newCanvas = new OffscreenCanvas(300, 300);
-          canvases.value[id] = {
-            canvas: newCanvas,
-            canvasManager: new WebGL2CanvasManager(newCanvas),
-            canvasImage: null,
-            blobUrl: null,
-          };
+        for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
+          image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
+        }
+
+
+        loadImages(image_urls, async (images) => {
+          numCellsWorldWidth.value = images[0].width;
+          numCellsWorldHeight.value = images[0].height;
+          canvas_manager.setup(images, () => {canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");})})
+        });
+      }
+    };
+    const drawOnCanvas = (id) => {
+      if (canvases.value[id]) {
 
           const canvas_manager = canvases.value[id].canvasManager;
 
@@ -51,103 +101,65 @@
           const NATURAL_TILES_TEXTURE_SIZE = 1024;
 
           const scale = 10;
-          //const width = getRandomInt(636 / scale, 636 * 2 / scale);
-          //const height = getRandomInt(404 / scale, 404 * 2 / scale);
-          //const x_offset = getRandomInt(20, 30);
-          //const y_offset = getRandomInt(20, 30);
-          //const canvas_width = 636 * 2;
-          //const canvas_height = 404 * 2;
+          const { width, height, x_offset, y_offset, canvas_width, canvas_height } =
+            smallRender
+              ? {
+                width: 4,
+                height: 4,
+                x_offset: -128 + getRandomInt(0, 3),
+                y_offset: -128 + getRandomInt(0, 3),
+                canvas_width: 512,
+                canvas_height: 512,
+              }
+              : {
+                width: getRandomInt(636 / scale, 636 * 2 / scale),
+                height: getRandomInt(404 / scale, 404 * 2 / scale),
+                x_offset: getRandomInt(20, 30),
+                y_offset: getRandomInt(20, 30),
+                canvas_width: 636 * 2,
+                canvas_height: 404 * 2,
+              };
 
-          const width = 4;
-          const height = 4;
-          const x_offset = -128;
-          const y_offset = -128;
-          const canvas_width = 512;
-          const canvas_height = 512;
+          canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");});
+        //canvases.value[id].setRectangle(50, 50, 100, 100);
+      }
+    };
 
-          let image_urls = [
-            "/elementIdx8.png",
-            "/temperature32.png",
-            "/mass32.png",
-            "/element_data_1x1.png"
-          ];
+    const clearCanvas = (id) => {
+      if (canvases.value[id]) {
+        canvases.value[id].canvasManager.clearCanvas();
+      }
+    };
 
-          for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
-            image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
+    const getCanvasImage = async (id) => {
+      if (canvases.value[id]) {
+        const canvas = canvases.value[id].canvas;
+
+        try {
+          const blob = await canvas.convertToBlob(); // <-- native method
+          const newUrl = URL.createObjectURL(blob);
+
+          // Revoke old Blob URL if it exists
+          if (canvases.value[id].blobUrl) {
+            URL.revokeObjectURL(canvases.value[id].blobUrl);
           }
 
-
-          loadImages(image_urls, async (images) => {
-            numCellsWorldWidth.value = images[0].width;
-            numCellsWorldHeight.value = images[0].height;
-            canvas_manager.setup(images, () => {canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");})})
-          });
+          canvases.value[id].blobUrl = newUrl;
+          canvases.value[id].canvasImage = newUrl;
+        } catch (err) {
+          console.error(`Failed to get image blob for ${id}`, err);
         }
-      };
-      const drawOnCanvas = (id) => {
-        if (canvases.value[id]) {
+      }
+    };
 
-            const canvas_manager = canvases.value[id].canvasManager;
-
-            // call loadImages with random values for width, height, x, y
-
-            const NATURAL_TILES_TEXTURE_SIZE = 1024;
-
-            const scale = 10;
-            //const width = getRandomInt(636 / scale, 636 * 2 / scale);
-            //const height = getRandomInt(404 / scale, 404 * 2 / scale);
-            //const x_offset = getRandomInt(20, 30);
-            //const y_offset = getRandomInt(20, 30);
-            //const canvas_width = 636 * 2;
-            //const canvas_height = 404 * 2;
-
-            const width = 4;
-            const height = 4;
-            const x_offset = -128 + getRandomInt(0, 3);
-            const y_offset = -128 + getRandomInt(0, 3);
-            const canvas_width = 512;
-            const canvas_height = 512;
-
-            canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");});
-          //canvases.value[id].setRectangle(50, 50, 100, 100);
-        }
-      };
-  
-      const clearCanvas = (id) => {
-        if (canvases.value[id]) {
-          canvases.value[id].canvasManager.clearCanvas();
-        }
-      };
-  
-      const getCanvasImage = async (id) => {
-        if (canvases.value[id]) {
-          const canvas = canvases.value[id].canvas;
-
-          try {
-            const blob = await canvas.convertToBlob(); // <-- native method
-            const newUrl = URL.createObjectURL(blob);
-
-            // Revoke old Blob URL if it exists
-            if (canvases.value[id].blobUrl) {
-              URL.revokeObjectURL(canvases.value[id].blobUrl);
-            }
-
-            canvases.value[id].blobUrl = newUrl;
-            canvases.value[id].canvasImage = newUrl;
-          } catch (err) {
-            console.error(`Failed to get image blob for ${id}`, err);
-          }
-        }
-      };
-  
-      return {
-        createCanvas,
-        drawOnCanvas,
-        clearCanvas,
-        getCanvasImage,
-        canvases,
-      };
-    },
-  };
-  </script>
+    return {
+      createCanvas,
+      drawOnCanvas,
+      clearCanvas,
+      getCanvasImage,
+      canvases,
+    };
+  },
+};
+</script>
   
