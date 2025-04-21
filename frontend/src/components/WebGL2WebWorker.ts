@@ -8,7 +8,7 @@ self.onmessage = async (event: MessageEvent) => {
     const { type, payload, requestId } = event.data;
 
     if (type === "init") {
-        instance = new WebGL2CanvasManager(payload.canvas);
+        instance = new WebGL2CanvasManager(...payload.args);
         self.postMessage({ type: "init", requestId });
     } else if (type === "setup") {
         instance.setup(payload.images, () => {

@@ -303,9 +303,9 @@ export default class WebGL2CanvasManager {
     private readonly positionBuffer : WebGLBuffer;
     private readonly NATURAL_TILES_TEXTURE_SIZE : number;
     private readonly RESOLUTION_LOCATION_NAME : string;
-    constructor(canvas: OffscreenCanvas) {
+    constructor(defaultWidth: number = 300, defaultHeight: number = 300) {
         // Get a WebGL context
-        this.canvas = canvas;
+        this.canvas = new OffscreenCanvas(defaultWidth, defaultHeight);
         const ctx = this.canvas.getContext("webgl2");
         if (!ctx) {
             console.error("WebGL2CanvasManager: WebGL2 is not supported.");

@@ -430,8 +430,7 @@ const initializeWebGL = () => {
     if (!webGLCanvas.value) {
       {
         console.log("Initializing canvas manager");
-        const newCanvas = new OffscreenCanvas(300, 300);
-        webGLCanvas.value = new WebGL2CanvasManager(newCanvas);
+        webGLCanvas.value = new WebGL2CanvasManager();
         const canvas_manager = webGLCanvas.value;
 
         console.log("Setting up canvas manager");

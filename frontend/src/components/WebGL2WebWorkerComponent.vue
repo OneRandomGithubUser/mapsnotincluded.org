@@ -64,8 +64,7 @@ export default {
     const createCanvas = async (id) => {
       if (!canvasManager.value) {
         console.log("Initializing canvas manager");
-        const newCanvas = new OffscreenCanvas(300, 300);
-        canvasManager.value = new WebGL2CanvasManager(newCanvas);
+        canvasManager.value = new WebGL2CanvasManager();
         const canvas_manager = canvasManager.value;
 
         console.log("Setting up canvas manager");

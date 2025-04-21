@@ -63,12 +63,12 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
     private requestId = 0;
     private callbacks: Record<number, Callback | ((data: any) => void)> = {};
 
-    constructor(canvas: OffscreenCanvas) {
+    constructor(defaultWidth: number, defaultHeight: number) {
         this.worker = new WebGLWorker();
 
         this.worker.onmessage = this.handleMessage.bind(this);
 
-        this.post("init", { canvas: canvas }, [canvas]);
+        this.post("init", { args: [ defaultWidth, defaultHeight ] });
     }
 
     private post(type: string, payload: any, transfer: Transferable[] = []): number {
