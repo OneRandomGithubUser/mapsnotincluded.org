@@ -18,7 +18,7 @@ import { useUserStore } from '@/stores';
 import "leaflet/dist/leaflet.css"
 import * as L from 'leaflet';
 
-import WebGL2CanvasManager from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2_ts.ts";
+import WebGL2CanvasManager from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2.ts";
 import {loadImagesAsync} from "@/components/LoadImage"; // Import the class
 
 const initialMap = ref(null);

@@ -1,5 +1,5 @@
 // @/workers/webgl2.worker.ts
-import WebGL2CanvasManager from "@/components/WebGL2_ts";
+import WebGL2CanvasManager from "@/components/WebGL2";
 
 // worker-global
 let instance: WebGL2CanvasManager = null;

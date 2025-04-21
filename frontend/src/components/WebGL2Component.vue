@@ -31,7 +31,7 @@
 
 <script>
 import { ref } from "vue";
-import WebGL2CanvasManager from "@/components/WebGL2_ts";
+import WebGL2CanvasManager from "@/components/WebGL2";
 import {loadImagesAsync} from "./LoadImage";
 
 

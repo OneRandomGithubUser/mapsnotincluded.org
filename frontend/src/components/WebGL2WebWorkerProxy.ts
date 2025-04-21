@@ -1,6 +1,6 @@
 // @/components/WebGL2Proxy.ts
 import WebGLWorker from "@/components/WebGL2WebWorker?worker";
-import WebGL2CanvasManager from "./WebGL2_ts.js";
+import WebGL2CanvasManager from "./WebGL2";
 
 type Callback = () => void;
 

@@ -32,8 +32,8 @@
 
 <script>
 import { ref } from "vue";
-import WebGL2CanvasManager from "@/components/WebGL2WebWorkerProxy.ts";
-import { loadImagesAsync } from "./LoadImage.ts";
+import WebGL2CanvasManager from "@/components/WebGL2WebWorkerProxy";
+import { loadImagesAsync } from "./LoadImage";
 
 
 function getRandomInt(min, max) {
