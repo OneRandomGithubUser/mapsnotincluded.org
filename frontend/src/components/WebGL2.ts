@@ -426,8 +426,6 @@ export default class WebGL2CanvasManager {
             num_pixels_world_height
         );
 
-        // this.resizeCanvasToDisplaySize(); // TODO: is this even relevant in an offscreen context?
-
         this.resetCanvasState();
 
         // Tell it to use our program (pair of shaders)
@@ -1233,12 +1231,6 @@ void main() {
         // TODO
     }
 
-    /*
-    getImage() : string {
-        //this.resizeCanvasToDisplaySize(this.canvas);
-        return this.canvas.toDataURL();
-    }
-     */
     async copyImageBlob(options?: ImageEncodeOptions) : Promise<Blob> {
         try {
             return this.canvas.convertToBlob(options);
@@ -1263,16 +1255,6 @@ void main() {
             console.error(`Failed to get image bitmap`, err);
             throw err;
         }
-    }
-
-    resizeCanvasToDisplaySize() : boolean { // TODO not relevant for an OffscreenCanvas?
-        const { width, height } = this.canvas.getBoundingClientRect();
-        if (this.canvas.width !== width || this.canvas.height !== height) {
-            this.canvas.width = width;
-            this.canvas.height = height;
-            return true;
-        }
-        return false;
     }
 
     resizeCanvas(width: number, height: number) : void {
