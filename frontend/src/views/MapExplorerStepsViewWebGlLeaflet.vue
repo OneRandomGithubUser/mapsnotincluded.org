@@ -18,7 +18,7 @@ import { useUserStore } from '@/stores';
 import "leaflet/dist/leaflet.css"
 import * as L from 'leaflet';
 
-import WebGL2CanvasManager from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2.ts";
+import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2.ts";
 import {loadImagesAsync} from "@/components/LoadImage"; // Import the class
 
 const initialMap = ref(null);
@@ -421,7 +421,7 @@ function getOffsetTileUrl(coords, elementId) {
 }
 
 const map = ref(null);
-const webGLCanvas = ref(null); // Store single WebGL2CanvasManager instance
+const webGLCanvas = ref(null); // Store single WebGL2Proxy instance
 const numCellsWorldWidth = ref(0);
 const numCellsWorldHeight = ref(0);
 
@@ -430,7 +430,7 @@ const initializeWebGL = () => {
     if (!webGLCanvas.value) {
       {
         console.log("Initializing canvas manager");
-        webGLCanvas.value = new WebGL2CanvasManager();
+        webGLCanvas.value = new WebGL2Proxy();
         const canvas_manager = webGLCanvas.value;
 
         console.log("Setting up canvas manager");
@@ -460,7 +460,7 @@ const initializeWebGL = () => {
 
         numCellsWorldWidth.value = images[0].width;
         numCellsWorldHeight.value = images[0].height;
-        canvas_manager.setup(imageBitmaps, () => {console.log("setup finished");});
+        await canvas_manager.setup(imageBitmaps);
         console.log("Created canvas manager!");
       }/*
       TODO: make sure
@@ -618,7 +618,7 @@ const initializeMap = () => {
     L.GridLayer.MyCanvasLayer = L.GridLayer.extend({
       createTile: function (coords, done) {
         if (!webGLCanvas.value) {
-          console.error("WebGL2CanvasManager is not initialized");
+          console.error("WebGL2Proxy is not initialized");
           return;
         }
 
@@ -673,16 +673,46 @@ const initializeMap = () => {
         };
 
         // ✅ Wait for WebGL setup before rendering
-        initializeWebGL().then(() => {
+        initializeWebGL().then(async () => {
           console.log("begin render");
-          webGLCanvas.value.render(
-              numCellsWorldWidth.value,
-              numCellsWorldHeight.value,
-              xy_scale, xy_scale,
-              x_offset, y_offset,
-              size.x, size.y,
-              callback
-          );
+          const [_, bitmap] = await webGLCanvas.value
+              .sequence()
+              .render(
+                numCellsWorldWidth.value,
+                numCellsWorldHeight.value,
+                xy_scale, xy_scale,
+                x_offset, y_offset,
+                size.x, size.y
+              ).transferImageBitmap()
+              .exec();
+          console.log("finish render");
+          console.log(bitmap);
+
+          try {
+
+            const debugOutlines = true;
+            const debugUrlPrint = false;
+
+            if (debugOutlines) {
+              const tile_2d_ctx = tile.getContext('2d');
+              tile_2d_ctx.drawImage(bitmap, 0, 0);
+              drawDebugInfo(tile_2d_ctx, coords, size.x, size.y);
+            } else {
+              const tile_bmp_ctx = tile.getContext('bitmaprenderer');
+              tile_bmp_ctx.transferFromImageBitmap(bitmap);
+            }
+
+            if (debugUrlPrint) {
+              canvasToBase64(tile).then((base64) => {
+                console.log(`Tile (${coords.x},${coords.y},${coords.z}) base64:`, base64);
+              });
+            }
+
+            done(null, tile);
+          } catch (err) {
+            console.error(`Failed to get canvas image bitmap`, err);
+            throw err;
+          }
         });
 
         return tile;

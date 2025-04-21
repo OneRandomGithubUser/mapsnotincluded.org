@@ -31,7 +31,7 @@
 
 <script>
 import { ref } from "vue";
-import WebGL2CanvasManager from "@/components/WebGL2";
+import WebGL2Proxy from "@/components/WebGL2";
 import {loadImagesAsync} from "./LoadImage";
 
 
@@ -60,7 +60,7 @@ export default {
     const createCanvas = async (id) => {
       if (!canvasManager.value) {
         console.log("Initializing canvas manager");
-        canvasManager.value = new WebGL2CanvasManager();
+        canvasManager.value = new WebGL2Proxy();
         const canvas_manager = canvasManager.value;
 
         console.log("Setting up canvas manager");
@@ -90,7 +90,7 @@ export default {
 
         numCellsWorldWidth.value = images[0].width;
         numCellsWorldHeight.value = images[0].height;
-        canvas_manager.setup(imageBitmaps, () => {console.log("setup finished");});
+        await canvas_manager.setup(imageBitmaps);
         console.log("Created canvas manager!");
       }
       if (!canvases.value[id]) {
@@ -122,10 +122,11 @@ export default {
               canvas_width: 636 * 2,
               canvas_height: 404 * 2,
             };
-        canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");});
+        await canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height);
+        console.log("render finished");
       }
     };
-    const drawOnCanvas = (id) => {
+    const drawOnCanvas = async (id) => {
       if (canvases.value[id]) {
 
           const canvas_manager = canvasManager.value;
@@ -154,7 +155,8 @@ export default {
                 canvas_height: 404 * 2,
               };
 
-          canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");});
+          await canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height);
+          console.log("render finished");
         //canvases.value[id].setRectangle(50, 50, 100, 100);
       }
     };

@@ -1,74 +1,70 @@
-// @/components/WebGL2Proxy.ts
 import WebGLWorker from "@/components/WebGL2WebWorker?worker";
-import WebGL2CanvasManager from "./WebGL2";
 
-type Callback = () => void;
-
-interface RenderArgs {
-    worldWidth: number;
-    worldHeight: number;
-    width: number;
-    height: number;
-    xOffset: number;
-    yOffset: number;
-    canvasWidth: number;
-    canvasHeight: number;
-    onComplete: Callback;
+interface Action {
+    type: string;
+    args?: any[];
 }
 
-interface IWebGL2AsyncManager {
-    /**
-     * Initializes the WebGL canvas with image assets.
-     * Called once after OffscreenCanvas is set up.
-     */
-    setup(images: HTMLImageElement[], onComplete: () => void): void;
-
-    /**
-     * Triggers a render with the given parameters.
-     * All coordinates are in logical or world space.
-     */
-    render(
-        worldWidth: number,
-        worldHeight: number,
-        width: number,
-        height: number,
-        xOffset: number,
-        yOffset: number,
-        canvasWidth: number,
-        canvasHeight: number,
-        onComplete: () => void
-    ): void;
-
-    /**
-     * Clears the canvas contents.
-     */
-    clearCanvas(): void;
-
-    /**
-     * Returns the current canvas content as an ImageBitmap.
-     * Zero-copy transfer recommended for rendering/display use.
-     */
-    getImageBitmap(): Promise<ImageBitmap>;
-
-    /**
-     * Returns the current canvas content as a Blob.
-     * Useful for saving or uploading.
-     */
-    getImageBlob(options?: ImageEncodeOptions): Promise<Blob>;
+interface Result {
+    success: boolean;
+    value?: any;
+    error?: string;
 }
 
+class SequenceBuilder<T extends any[] = []> {
+    private actions: Action[] = [];
+
+    constructor(private proxy: WebGL2Proxy) {}
+
+    render(...args: Parameters<WebGL2Proxy["render"]>) {
+        this.actions.push({ type: "render", args });
+        // unknown is needed, but even though the cast is safe (the types are controlled), TypeScript cannot prove it.
+        return this as unknown as SequenceBuilder<[...T, void]>;
+    }
+
+    transferImageBitmap() {
+        this.actions.push({ type: "transferImageBitmap" });
+        // unknown is needed, but even though the cast is safe (the types are controlled), TypeScript cannot prove it.
+        return this as unknown as SequenceBuilder<[...T, ImageBitmap]>;
+    }
+
+    copyImageBlob(options: ImageEncodeOptions = { type: "image/webp" }) {
+        this.actions.push({ type: "copyImageArrayBuffer", args: [options] });
+        // unknown is needed, but even though the cast is safe (the types are controlled), TypeScript cannot prove it.
+        return this as unknown as SequenceBuilder<[...T, Blob]>;
+    }
+
+    async exec(): Promise<T> {
+        const results = await this.proxy.runSequence(this.actions);
+        const resolved = results.map((r, i) => {
+            if (!r.success) throw new Error(`Action ${this.actions[i].type} failed: ${r.error}`);
+            if (this.actions[i].type === "copyImageArrayBuffer") {
+                return new Blob([r.value], this.actions[i].args?.[0]);
+            }
+            return r.value;
+        });
+        return resolved as T;
+    }
+}
+
+
+export interface IWebGL2AsyncManager {
+    setup(images: HTMLImageElement[]): Promise<void>;
+    render(...args: any[]): Promise<void>;
+    clearCanvas(): Promise<void>;
+    copyImageBlob(options?: ImageEncodeOptions): Promise<Blob>;
+    transferImageBitmap(): Promise<ImageBitmap>;
+}
 
 export default class WebGL2Proxy implements IWebGL2AsyncManager {
     private worker: Worker;
     private requestId = 0;
-    private callbacks: Record<number, Callback | ((data: any) => void)> = {};
+    private callbacks: Record<number, (results: Result[]) => void> = {};
 
-    constructor(defaultWidth: number, defaultHeight: number) {
+    constructor(...initArgs: any[]) {
         this.worker = new WebGLWorker();
-
         this.worker.onmessage = this.handleMessage.bind(this);
-
-        this.post("init", { args: [ defaultWidth, defaultHeight ] });
+        this.post("init", { args: initArgs });
     }
 
     private post(type: string, payload: any, transfer: Transferable[] = []): number {
@@ -77,20 +73,26 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
         return requestId;
     }
 
-    private handleMessage(event: MessageEvent) : void {
-        const { type, requestId, data } = event.data;
-        if (this.callbacks[requestId]) {
-            this.callbacks[requestId](data);
+    private handleMessage(event: MessageEvent): void {
+        const { type, requestId, results } = event.data;
+        if (type === "runSequenceComplete" && this.callbacks[requestId]) {
+            this.callbacks[requestId](results);
             delete this.callbacks[requestId];
         }
     }
 
-    setup(images: HTMLImageElement[], onComplete: Callback) : void {
-        const id = this.post("setup", { images });
-        this.callbacks[id] = onComplete;
+    public runSequence(actions: Action[], transfers: Transferable[] = []): Promise<Result[]> {
+        return new Promise((resolve) => {
+            const requestId = this.post("runSequence", { actions }, transfers);
+            this.callbacks[requestId] = resolve;
+        });
     }
 
-    render(
+    async setup(images: HTMLImageElement[]): Promise<void> {
+        await this.runSequence([{ type: "setup", args: [images] }]);
+    }
+
+    async render(
         worldWidth: number,
         worldHeight: number,
         width: number,
@@ -98,52 +100,37 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
         xOffset: number,
         yOffset: number,
         canvasWidth: number,
-        canvasHeight: number,
-        onComplete: Callback
-    ) : void {
-        const id = this.post("render", {
-            args: [worldWidth, worldHeight, width, height, xOffset, yOffset, canvasWidth, canvasHeight]
-        });
-        this.callbacks[id] = onComplete;
+        canvasHeight: number
+    ): Promise<void> {
+        await this.runSequence([
+            {
+                type: "render",
+                args: [worldWidth, worldHeight, width, height, xOffset, yOffset, canvasWidth, canvasHeight],
+            },
+        ]);
     }
 
-    clearCanvas() : void {
-        this.post("clearCanvas", {});
+    async clearCanvas(): Promise<void> {
+        await this.runSequence([{ type: "clearCanvas" }]);
     }
 
-    copyImageBlob(options: ImageEncodeOptions={ type: "image/webp" }): Promise<Blob> {
-        return new Promise((resolve, reject) => {
-            const id = this.post("copyImageArrayBuffer", {
-                args: [options]
-            });
-            this.callbacks[id] = (buffer: ArrayBuffer) => {
-                try {
-                    const blob = new Blob([buffer], options); // or whatever format
-                    resolve(blob);
-                } catch (e) {
-                    reject(e);
-                }
-            };
-        });
+    async copyImageBlob(options: ImageEncodeOptions = { type: "image/webp" }): Promise<Blob> {
+        const results = await this.runSequence([
+            { type: "copyImageArrayBuffer", args: [options] }
+        ]);
+        const buffer = results[0].value as ArrayBuffer;
+        return new Blob([buffer], options);
     }
 
-    transferImageBitmap(): Promise<ImageBitmap> {
-        return new Promise((resolve, reject) => {
-            const id = this.post("transferImageBitmap", {});
-            this.callbacks[id] = (bitmap: ImageBitmap) => {
-                resolve(bitmap);
-            };
-        });
+    async transferImageBitmap(): Promise<ImageBitmap> {
+        const results = await this.runSequence([
+            { type: "transferImageBitmap" }
+        ]);
+        return results[0].value as ImageBitmap;
     }
 
-
-
-    /*
-    getImage(): Promise<string> {
-        return new Promise((resolve) => {
-            const id = this.post("getImage", {});
-            this.callbacks[id] = resolve;
-        });
+    sequence() {
+        return new SequenceBuilder(this);
     }
-     */
+
 }

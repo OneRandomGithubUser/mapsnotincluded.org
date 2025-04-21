@@ -328,8 +328,7 @@ export default class WebGL2CanvasManager {
         this.RESOLUTION_LOCATION_NAME = "u_resolution";
     }
     setup(
-        images: HTMLImageElement[],
-        callback: () => {}
+        images: HTMLImageElement[]
     ) : void {
         // TODO: lazy texture loading with large images
         const gl = this.gl;
@@ -393,8 +392,6 @@ export default class WebGL2CanvasManager {
         this.bindTextureArrayToUnit(worldEtmTextureArray, "u_world_data_image_array", 3);
         this.bindTextureArrayToUnit(elementDataTextureArray, "u_element_data_image_array", 4);
         this.bindTextureArrayToUnit(naturalTilesTextureArray, "u_natural_tile_image_array", 5);
-
-        callback();
     }
     render(
         numCellsWorldWidth: number,
@@ -404,9 +401,8 @@ export default class WebGL2CanvasManager {
         num_cells_left_edge_x: number,
         num_cells_bottom_edge_y: number,
         canvas_width: number,
-        canvas_height: number,
-        callback: () => {}
-    ) {
+        canvas_height: number
+    ): void {
         const gl = this.gl;
 
         this.resizeCanvas(canvas_width, canvas_height);
@@ -446,8 +442,6 @@ export default class WebGL2CanvasManager {
         this.drawScene();
 
         console.log("Checking WebGL errors at the end of render():", gl.getError()); // TODO: more error reporting
-
-        callback();
     }
 
     getVertexShaderGLSL() {
