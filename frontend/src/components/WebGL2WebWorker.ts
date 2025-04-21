@@ -21,22 +21,22 @@ self.onmessage = async (event: MessageEvent) => {
     } else if (type === "clearCanvas") {
         instance.clearCanvas();
         self.postMessage({ type: "clearComplete", requestId });
-    } else if (type === "getImageArrayBuffer") {
+    } else if (type === "copyImageArrayBuffer") {
         try {
-            const arrayBuffer = await instance.getImageArrayBuffer(...(payload?.args || []));
+            const arrayBuffer = await instance.copyImageArrayBuffer(...(payload?.args || []));
             self.postMessage(
-                { type: "getImageArrayBufferComplete", requestId, data: arrayBuffer },
+                { type: "copyImageArrayBufferComplete", requestId, data: arrayBuffer },
                 [arrayBuffer]
             );
         } catch (err) {
             self.postMessage({ type: "error", requestId, error: err.message });
             throw err;
         }
-    } else if (type === "getImageBitmap") {
+    } else if (type === "transferImageBitmap") {
         try {
-            const bitmap = instance.getImageBitmap();
+            const bitmap = instance.transferImageBitmap();
             self.postMessage(
-                { type: "getImageBitmapComplete", requestId, data: bitmap },
+                { type: "transferImageBitmapComplete", requestId, data: bitmap },
                 [bitmap]
             );
         } catch (err) {

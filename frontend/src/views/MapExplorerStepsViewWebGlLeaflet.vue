@@ -641,7 +641,7 @@ const initializeMap = () => {
           console.log("Render Tile Callback");
 
           try {
-            const bitmap = await webGLCanvas.value.getImageBitmap();
+            const bitmap = await webGLCanvas.value.transferImageBitmap();
 
             // const ocanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
 

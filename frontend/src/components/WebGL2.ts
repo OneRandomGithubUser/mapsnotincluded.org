@@ -1239,7 +1239,7 @@ void main() {
         return this.canvas.toDataURL();
     }
      */
-    async getImageBlob(options?: ImageEncodeOptions) : Promise<Blob> {
+    async copyImageBlob(options?: ImageEncodeOptions) : Promise<Blob> {
         try {
             return this.canvas.convertToBlob(options);
         } catch (err) {
@@ -1247,16 +1247,16 @@ void main() {
             throw err;
         }
     }
-    async getImageArrayBuffer(options?: ImageEncodeOptions) : Promise<ArrayBuffer> {
+    async copyImageArrayBuffer(options?: ImageEncodeOptions) : Promise<ArrayBuffer> {
         try {
-            const blob = await this.getImageBlob(options);
+            const blob = await this.copyImageBlob(options);
             return blob.arrayBuffer();
         } catch (err) {
             console.error(`Failed to get image blob array buffer`, err);
             throw err;
         }
     }
-    getImageBitmap() : ImageBitmap {
+    transferImageBitmap() : ImageBitmap {
         try {
             return this.canvas.transferToImageBitmap();
         } catch (err) {

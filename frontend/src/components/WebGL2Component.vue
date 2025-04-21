@@ -4,15 +4,15 @@
       <button @click="createCanvas('canvas1')">Create Canvas 1</button>
       <button @click="drawOnCanvas('canvas1')">Draw on Canvas 1</button>
       <button @click="clearCanvas('canvas1')">Clear Canvas 1</button>
-      <button @click="getCanvasImageBlob('canvas1')">Get Image 1 (Blob)</button>
-      <button @click="getCanvasImageBitmap('canvas1')">Get Image (Bitmap)</button>
+      <button @click="copyCanvasImageBlob('canvas1')">Copy Image 1 (Blob)</button>
+      <button @click="transferCanvasImageBitmap('canvas1')">Transfer Image (Bitmap)</button>
     </div>
     <div>
       <button @click="createCanvas('canvas2')">Create Canvas 2</button>
       <button @click="drawOnCanvas('canvas2')">Draw on Canvas 2</button>
       <button @click="clearCanvas('canvas2')">Clear Canvas 2</button>
-      <button @click="getCanvasImageBlob('canvas2')">Get Image 2 (Blob)</button>
-      <button @click="getCanvasImageBitmap('canvas2')">Get Image 2 (Bitmap)</button>
+      <button @click="copyCanvasImageBlob('canvas2')">Copy Image 2 (Blob)</button>
+      <button @click="transferCanvasImageBitmap('canvas2')">Transfer Image 2 (Bitmap)</button>
     </div>
 
     <div v-if="canvases">
@@ -165,12 +165,12 @@ export default {
       }
     };
 
-    const getCanvasImageBlob = async (id) => {
+    const copyCanvasImageBlob = async (id) => {
       if (!canvases.value[id]) return;
 
       try {
         const canvas_manager = canvasManager.value;
-        const blob = await canvas_manager.getImageBlob(); // WebGL2Proxy
+        const blob = await canvas_manager.copyImageBlob(); // WebGL2Proxy
         const url = URL.createObjectURL(blob);
 
         if (canvases.value[id].blobUrl) {
@@ -186,12 +186,12 @@ export default {
       }
     };
 
-    const getCanvasImageBitmap = async (id) => {
+    const transferCanvasImageBitmap = async (id) => {
       if (!canvases.value[id]) return;
 
       try {
         const canvas_manager = canvasManager.value;
-        const bitmap = await canvas_manager.getImageBitmap(); // WebGL2Proxy
+        const bitmap = await canvas_manager.transferImageBitmap(); // WebGL2Proxy
 
         // Create a visible canvas to draw the bitmap into
         const ocanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
@@ -216,8 +216,8 @@ export default {
       createCanvas,
       drawOnCanvas,
       clearCanvas,
-      getCanvasImageBlob,
-      getCanvasImageBitmap,
+      copyCanvasImageBlob,
+      transferCanvasImageBitmap,
       canvases,
     };
   },

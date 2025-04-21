@@ -111,9 +111,9 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
         this.post("clearCanvas", {});
     }
 
-    getImageBlob(options: ImageEncodeOptions={ type: "image/webp" }): Promise<Blob> {
+    copyImageBlob(options: ImageEncodeOptions={ type: "image/webp" }): Promise<Blob> {
         return new Promise((resolve, reject) => {
-            const id = this.post("getImageArrayBuffer", {
+            const id = this.post("copyImageArrayBuffer", {
                 args: [options]
             });
             this.callbacks[id] = (buffer: ArrayBuffer) => {
@@ -127,9 +127,9 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
         });
     }
 
-    getImageBitmap(): Promise<ImageBitmap> {
+    transferImageBitmap(): Promise<ImageBitmap> {
         return new Promise((resolve, reject) => {
-            const id = this.post("getImageBitmap", {});
+            const id = this.post("transferImageBitmap", {});
             this.callbacks[id] = (bitmap: ImageBitmap) => {
                 resolve(bitmap);
             };
