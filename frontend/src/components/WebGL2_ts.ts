@@ -1239,6 +1239,31 @@ void main() {
         return this.canvas.toDataURL();
     }
      */
+    async getImageBlob(options?: ImageEncodeOptions) : Promise<Blob> {
+        try {
+            return this.canvas.convertToBlob(options);
+        } catch (err) {
+            console.error(`Failed to get image blob`, err);
+            throw err;
+        }
+    }
+    async getImageArrayBuffer(options?: ImageEncodeOptions) : Promise<ArrayBuffer> {
+        try {
+            const blob = await this.getImageBlob(options);
+            return blob.arrayBuffer();
+        } catch (err) {
+            console.error(`Failed to get image blob array buffer`, err);
+            throw err;
+        }
+    }
+    getImageBitmap() : ImageBitmap {
+        try {
+            return this.canvas.transferToImageBitmap();
+        } catch (err) {
+            console.error(`Failed to get image bitmap`, err);
+            throw err;
+        }
+    }
 
     resizeCanvasToDisplaySize() : boolean { // TODO not relevant for an OffscreenCanvas?
         const { width, height } = this.canvas.getBoundingClientRect();

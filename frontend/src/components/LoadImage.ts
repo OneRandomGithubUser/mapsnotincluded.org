@@ -1,19 +1,18 @@
-const loadImage = (
-    url: string,
-    onLoad: () => void,
-    onError?: (url: string, err: any) => void
-): HTMLImageElement => {
-    const image = new Image();
-    image.onload = onLoad;
-    image.onerror = (err) => {
-        console.error(`❌ Failed to load image: ${url}`, err);
-        if (onError) onError(url, err);
-    };
-    image.src = url;
-    return image;
+// Helper to load a single image and return a Promise
+const loadImagePromise = (url: string): Promise<HTMLImageElement> => {
+    return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => resolve(image);
+        image.onerror = (err) => {
+            console.error(`❌ Failed to load image: ${url}`, err);
+            reject({ url, err });
+        };
+        image.src = url;
+    });
 };
 
-const loadImages = (
+// Legacy-style callback interface
+const loadImagesSync = (
     urls: string[],
     onAllSuccess: (images: HTMLImageElement[], ...args: any[]) => void,
     onError?: (url: string, err: any) => void,
@@ -27,17 +26,25 @@ const loadImages = (
         return;
     }
 
-    const onImageLoad = () => {
-        imagesToLoad--;
-        if (imagesToLoad === 0) {
-            onAllSuccess(images, ...extraParams);
-        }
-    };
-
-    urls.forEach((url) => {
-        const image = loadImage(url, onImageLoad, onError);
-        images.push(image);
+    urls.forEach((url, i) => {
+        loadImagePromise(url)
+            .then((img) => {
+                images[i] = img;
+                imagesToLoad--;
+                if (imagesToLoad === 0) {
+                    onAllSuccess(images, ...extraParams);
+                }
+            })
+            .catch(({ url, err }) => {
+                if (onError) onError(url, err);
+            });
     });
 };
 
-export { loadImage, loadImages };
+// Modern async version
+const loadImagesAsync = async (urls: string[]): Promise<HTMLImageElement[]> => {
+    const imagePromises = urls.map(loadImagePromise);
+    return Promise.all(imagePromises);
+};
+
+export { loadImagePromise as loadImage, loadImagesSync, loadImagesAsync };

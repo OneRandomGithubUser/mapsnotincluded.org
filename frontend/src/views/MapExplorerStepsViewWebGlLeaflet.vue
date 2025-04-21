@@ -18,8 +18,8 @@ import { useUserStore } from '@/stores';
 import "leaflet/dist/leaflet.css"
 import * as L from 'leaflet';
 
-import WebGL2CanvasManager from "@/components/WebGL2_ts.js";
-import {loadImages} from "@/components/LoadImage.js"; // Import the class
+import WebGL2CanvasManager from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2_ts.ts";
+import {loadImagesAsync} from "@/components/LoadImage"; // Import the class
 
 const initialMap = ref(null);
 
@@ -426,32 +426,73 @@ const numCellsWorldWidth = ref(0);
 const numCellsWorldHeight = ref(0);
 
 const initializeWebGL = () => {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     if (!webGLCanvas.value) {
-      webGLCanvas.value = new WebGL2CanvasManager(300, 300);
+      {
+        console.log("Initializing canvas manager");
+        const newCanvas = new OffscreenCanvas(300, 300);
+        webGLCanvas.value = new WebGL2CanvasManager(newCanvas);
+        const canvas_manager = webGLCanvas.value;
 
-      const NATURAL_TILES_TEXTURE_SIZE = 1024;
-      let image_urls = [
-        "/elementIdx8.png",
-        "/temperature32.png",
-        "/mass32.png",
-        "/element_data_1x1.png"
-      ];
+        console.log("Setting up canvas manager");
 
-      for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
-        image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
-      }
+        console.log("  Loading images");
 
-      // Load images and resolve Promise when setup is done
-      loadImages(image_urls, (images) => {
+        const NATURAL_TILES_TEXTURE_SIZE = 1024;
+
+        let image_urls = [
+          "/elementIdx8.png",
+          "/temperature32.png",
+          "/mass32.png",
+          "/element_data_1x1.png"
+        ];
+
+        for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
+          image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
+        }
+
+        const images = await loadImagesAsync(image_urls);
+
+        console.log("  Bitmapping images");
+
+        const imageBitmaps = await Promise.all(images.map(img => createImageBitmap(img)));
+
+        console.log("  Inserting images to canvas manager");
+
         numCellsWorldWidth.value = images[0].width;
         numCellsWorldHeight.value = images[0].height;
+        canvas_manager.setup(imageBitmaps, () => {console.log("setup finished");});
+        console.log("Created canvas manager!");
+      }/*
+      TODO: make sure
+        const canvas_manager = canvasManager.value;
 
-        webGLCanvas.value.setup(images, () => {
-          console.log("WebGL Setup Completed");
-          resolve(); // ✅ Ensure the promise resolves after setup
-        });
-      });
+        // call loadImages with random values for width, height, x, y
+
+        const scale = 10;
+        const { width, height, x_offset, y_offset, canvas_width, canvas_height } =
+            smallRender[id]
+                ? {
+                  width: 4,
+                  height: 4,
+                  x_offset: -128,
+                  y_offset: -128,
+                  canvas_width: 512,
+                  canvas_height: 512,
+                }
+                : {
+                  width: getRandomInt(636 / scale, 636 * 2 / scale),
+                  height: getRandomInt(404 / scale, 404 * 2 / scale),
+                  x_offset: getRandomInt(20, 30),
+                  y_offset: getRandomInt(20, 30),
+                  canvas_width: 636 * 2,
+                  canvas_height: 404 * 2,
+                };
+
+        canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");});
+      }
+      */
+      resolve(); // ✅ Ensure the promise resolves after setup
     } else {
       resolve(); // If already initialized, resolve immediately
     }
@@ -492,8 +533,76 @@ const drawDebugInfo = (ctx, coords, width, height) => {
   ctx.fillText(`${width} × ${height} px`, width / 2, height / 2 + 10);
 };
 
+/*
+TODO TS version, copy elsewhere
+const canvasToBase64 = async (canvas: OffscreenCanvas | HTMLCanvasElement): Promise<string> => {
+  let blob: Blob;
 
+  if ('convertToBlob' in canvas) {
+    // OffscreenCanvas path
+    blob = await (canvas as OffscreenCanvas).convertToBlob({ type: "image/png" });
+  } else if ('toBlob' in canvas) {
+    // HTMLCanvasElement path
+    blob = await new Promise<Blob>((resolve, reject) => {
+      (canvas as HTMLCanvasElement).toBlob((b) => {
+        if (b) resolve(b);
+        else reject(new Error("Failed to convert canvas to blob"));
+      }, "image/png");
+    });
+  } else {
+    throw new Error("Unsupported canvas type");
+  }
 
+  // Read the blob as a base64 string
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
+ */
+const canvasToBase64 = async (canvas) => {
+  let blob;
+
+  if ('convertToBlob' in canvas) {
+    // OffscreenCanvas path
+    blob = await canvas.convertToBlob({ type: "image/png" });
+  } else if ('toBlob' in canvas) {
+    // HTMLCanvasElement path
+    blob = await new Promise((resolve, reject) => {
+      canvas.toBlob((b) => {
+        if (b) resolve(b);
+        else reject(new Error("Failed to convert canvas to blob"));
+      }, "image/png");
+    });
+  } else {
+    throw new Error("Unsupported canvas type");
+  }
+
+  // Read the blob as a base64 string
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+};
+
+// TODO: TS version, async/sync
+const imageToBase64 = (img, type = "image/png") => {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Failed to get canvas context");
+
+  ctx.drawImage(img, 0, 0);
+
+  return canvas.toDataURL(type);
+}
 
 const initializeMap = () => {
   if (!map.value) {
@@ -518,7 +627,7 @@ const initializeMap = () => {
         var size = this.getTileSize();
         tile.width = size.x;
         tile.height = size.y;
-        var ctx = tile.getContext("2d");
+        //var ctx = tile.getContext("2d");
 
         const canvas_size = get_map_units_per_cell_from_zoom(coords.z);
         const xy_scale = get_cells_per_zoom_0_map_tile_from_zoom(coords.z);
@@ -529,21 +638,44 @@ const initializeMap = () => {
 
         console.log("xyz", coords, canvas_size, xy_scale, x_offset, y_offset);
 
-        const callback = () => {
+        const callback = async () => {
           console.log("Render Tile Callback");
-          ctx.drawImage(webGLCanvas.value.canvas, 0, 0, size.x, size.y);
 
-          const debugMode = true;
+          try {
+            const bitmap = await webGLCanvas.value.getImageBitmap();
 
-          if (debugMode) {
-            drawDebugInfo(ctx, coords, size.x, size.y);
+            // const ocanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+
+            // ctx.drawImage(webGLCanvas.value.canvas, 0, 0, size.x, size.y);
+
+            const debugOutlines = true;
+            const debugUrlPrint = false;
+
+            if (debugOutlines) {
+              const tile_2d_ctx = tile.getContext('2d');
+              tile_2d_ctx.drawImage(bitmap, 0, 0);
+              drawDebugInfo(tile_2d_ctx, coords, size.x, size.y);
+            } else {
+              const tile_bmp_ctx = tile.getContext('bitmaprenderer');
+              tile_bmp_ctx.transferFromImageBitmap(bitmap);
+            }
+
+            if (debugUrlPrint) {
+              canvasToBase64(tile).then((base64) => {
+                console.log(`Tile (${coords.x},${coords.y},${coords.z}) base64:`, base64);
+              });
+            }
+
+            done(null, tile);
+          } catch (err) {
+            console.error(`Failed to get canvas image bitmap`, err);
+            throw err;
           }
-
-          done(null, tile);
         };
 
         // ✅ Wait for WebGL setup before rendering
         initializeWebGL().then(() => {
+          console.log("begin render");
           webGLCanvas.value.render(
               numCellsWorldWidth.value,
               numCellsWorldHeight.value,

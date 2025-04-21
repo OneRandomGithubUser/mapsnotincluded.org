@@ -1,42 +1,62 @@
+// @/workers/webgl2.worker.ts
+import WebGL2CanvasManager from "@/components/WebGL2_ts";
 
-import WebGL2CanvasManager from "@/components/WebGL2_ts.js";
+// worker-global
+let instance: WebGL2CanvasManager = null;
 
-export class WebGL2WebWorker {
-    private worker: Worker;
-    private idCounter = 0;
-    private callbacks = new Map<number, (value: any) => void>();
+self.onmessage = async (event: MessageEvent) => {
+    const { type, payload, requestId } = event.data;
 
-    constructor(workerScriptUrl: string) {
-        this.worker = new Worker(workerScriptUrl, { type: 'module' });
-
-        this.worker.onmessage = (e) => {
-            const { id, result, error } = e.data;
-            const callback = this.callbacks.get(id);
-            if (callback) {
-                callback(error ? Promise.reject(error) : result);
-                this.callbacks.delete(id);
-            }
-        };
-    }
-
-    private send<T>(message: object): Promise<T> {
-        const id = this.idCounter++;
-        return new Promise<T>((resolve, reject) => {
-            this.callbacks.set(id, (result) => {
-                result instanceof Promise ? result.then(resolve).catch(reject) : resolve(result);
-            });
-            this.worker.postMessage({ ...message, id });
+    if (type === "init") {
+        instance = new WebGL2CanvasManager(payload.canvas);
+        self.postMessage({ type: "init", requestId });
+    } else if (type === "setup") {
+        instance.setup(payload.images, () => {
+            self.postMessage({ type: "setupComplete", requestId });
+        });
+    } else if (type === "render") {
+        instance.render(...payload.args, () => {
+            self.postMessage({ type: "renderComplete", requestId });
+        });
+    } else if (type === "clearCanvas") {
+        instance.clearCanvas();
+        self.postMessage({ type: "clearComplete", requestId });
+    } else if (type === "getImageArrayBuffer") {
+        try {
+            const arrayBuffer = await instance.getImageArrayBuffer(...(payload?.args || []));
+            self.postMessage(
+                { type: "getImageArrayBufferComplete", requestId, data: arrayBuffer },
+                [arrayBuffer]
+            );
+        } catch (err) {
+            self.postMessage({ type: "error", requestId, error: err.message });
+            throw err;
+        }
+    } else if (type === "getImageBitmap") {
+        try {
+            const bitmap = instance.getImageBitmap();
+            self.postMessage(
+                { type: "getImageBitmapComplete", requestId, data: bitmap },
+                [bitmap]
+            );
+        } catch (err) {
+            self.postMessage({ type: "error", requestId, error: err.message });
+            throw err;
+        }
+    } else {
+        const errorMessage = `Unknown message type received: "${type}"`;
+        console.error(errorMessage);
+        self.postMessage({
+            type: "error",
+            requestId,
+            error: errorMessage,
         });
     }
 
-    async init(config: ConstructorParameters<typeof WebGL2CanvasManager>[0]) {
-        return this.send<string>({ type: 'init', payload: config });
-    }
-
-    async call<T extends keyof WebGL2CanvasManager>(
-        method: T,
-        args: Parameters<WebGL2CanvasManager[T]>
-    ): Promise<ReturnType<WebGL2CanvasManager[T]>> {
-        return this.send<ReturnType<WebGL2CanvasManager[T]>>({ type: 'call', method, args });
-    }
-}
+    /* else if (type === "getImage") {
+           const base64 = await instance.getImage(); // returns string
+           console.log(base64);
+           self.postMessage({ type: "imageData", data: base64, requestId });
+       } */
+};
+export default {};

@@ -1,21 +1,38 @@
 <template>
   <div>
-    <button @click="createCanvas('canvas1')">Create Canvas 1</button>
-    <button @click="drawOnCanvas('canvas1')">Draw on Canvas 1</button>
-    <button @click="clearCanvas('canvas1')">Clear Canvas 1</button>
-    <button @click="getCanvasImage('canvas1')">Get Image</button>
+    <div>
+      <button @click="createCanvas('canvas1')">Create Canvas 1</button>
+      <button @click="drawOnCanvas('canvas1')">Draw on Canvas 1</button>
+      <button @click="clearCanvas('canvas1')">Clear Canvas 1</button>
+      <button @click="getCanvasImageBlob('canvas1')">Get Image 1 (Blob)</button>
+      <button @click="getCanvasImageBitmap('canvas1')">Get Image (Bitmap)</button>
+    </div>
+    <div>
+      <button @click="createCanvas('canvas2')">Create Canvas 2</button>
+      <button @click="drawOnCanvas('canvas2')">Draw on Canvas 2</button>
+      <button @click="clearCanvas('canvas2')">Clear Canvas 2</button>
+      <button @click="getCanvasImageBlob('canvas2')">Get Image 2 (Blob)</button>
+      <button @click="getCanvasImageBitmap('canvas2')">Get Image 2 (Bitmap)</button>
+    </div>
 
-    <div v-if="canvases['canvas1']">
-      <p>Canvas 1 Render:</p>
-      <img :src="canvases['canvas1'].canvasImage" />
+    <div v-if="canvases">
+      <div v-if="canvases['canvas1']">
+        <p>Canvas 1 Render:</p>
+        <img :src="canvases['canvas1']?.canvasImage" />
+      </div>
+
+      <div v-if="canvases['canvas2']">
+        <p>Canvas 2 Render:</p>
+        <img :src="canvases['canvas2']?.canvasImage" />
+      </div>
     </div>
   </div>
 </template>
 
 <script>
 import { ref } from "vue";
-import WebGL2CanvasManager from "@/components/WebGL2_ts.ts";
-import { loadImages } from "./LoadImage";
+import WebGL2CanvasManager from "@/components/WebGL2_ts";
+import {loadImagesAsync} from "./LoadImage";
 
 
           function getRandomInt(min, max) {
@@ -30,31 +47,67 @@ import { loadImages } from "./LoadImage";
 export default {
   setup() {
     const canvases = ref({});
+    const canvasManager = ref(null);
 
-    const numCellsWorldWidth = ref(0);
-    const numCellsWorldHeight = ref(0);
+    const numCellsWorldWidth = ref(null);
+    const numCellsWorldHeight = ref(null);
 
-    const smallRender = false;
+    const smallRender = {
+      "canvas1": true,
+      "canvas2": false,
+    };
 
-    const createCanvas = (id) => {
-      if (!canvases.value[id]) {
+    const createCanvas = async (id) => {
+      if (!canvasManager.value) {
+        // TODO: move OffscreenCanvas initialization to canvas manager class
+        console.log("Initializing canvas manager");
         const newCanvas = new OffscreenCanvas(300, 300);
+        canvasManager.value = new WebGL2CanvasManager(newCanvas);
+        const canvas_manager = canvasManager.value;
+
+        console.log("Setting up canvas manager");
+
+        console.log("  Loading images");
+
+        const NATURAL_TILES_TEXTURE_SIZE = 1024;
+
+        let image_urls = [
+          "/elementIdx8.png",
+          "/temperature32.png",
+          "/mass32.png",
+          "/element_data_1x1.png"
+        ];
+
+        for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
+          image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
+        }
+
+        const images = await loadImagesAsync(image_urls);
+
+        console.log("  Bitmapping images");
+
+        const imageBitmaps = await Promise.all(images.map(img => createImageBitmap(img)));
+
+        console.log("  Inserting images to canvas manager");
+
+        numCellsWorldWidth.value = images[0].width;
+        numCellsWorldHeight.value = images[0].height;
+        canvas_manager.setup(imageBitmaps, () => {console.log("setup finished");});
+        console.log("Created canvas manager!");
+      }
+      if (!canvases.value[id]) {
         canvases.value[id] = {
-          canvas: newCanvas,
-          canvasManager: new WebGL2CanvasManager(newCanvas),
           canvasImage: null,
           blobUrl: null,
         };
 
-        const canvas_manager = canvases.value[id].canvasManager;
+        const canvas_manager = canvasManager.value;
 
         // call loadImages with random values for width, height, x, y
 
-        const NATURAL_TILES_TEXTURE_SIZE = 1024;
-
         const scale = 10;
         const { width, height, x_offset, y_offset, canvas_width, canvas_height } =
-          smallRender
+          smallRender[id]
             ? {
               width: 4,
               height: 4,
@@ -71,30 +124,13 @@ export default {
               canvas_width: 636 * 2,
               canvas_height: 404 * 2,
             };
-
-        let image_urls = [
-          "/elementIdx8.png",
-          "/temperature32.png",
-          "/mass32.png",
-          "/element_data_1x1.png"
-        ];
-
-        for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
-          image_urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
-        }
-
-
-        loadImages(image_urls, async (images) => {
-          numCellsWorldWidth.value = images[0].width;
-          numCellsWorldHeight.value = images[0].height;
-          canvas_manager.setup(images, () => {canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");})})
-        });
+        canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");});
       }
     };
     const drawOnCanvas = (id) => {
       if (canvases.value[id]) {
 
-          const canvas_manager = canvases.value[id].canvasManager;
+          const canvas_manager = canvasManager.value;
 
           // call loadImages with random values for width, height, x, y
 
@@ -102,7 +138,7 @@ export default {
 
           const scale = 10;
           const { width, height, x_offset, y_offset, canvas_width, canvas_height } =
-            smallRender
+              smallRender[id]
               ? {
                 width: 4,
                 height: 4,
@@ -131,24 +167,50 @@ export default {
       }
     };
 
-    const getCanvasImage = async (id) => {
-      if (canvases.value[id]) {
-        const canvas = canvases.value[id].canvas;
+    const getCanvasImageBlob = async (id) => {
+      if (!canvases.value[id]) return;
 
-        try {
-          const blob = await canvas.convertToBlob(); // <-- native method
-          const newUrl = URL.createObjectURL(blob);
+      try {
+        const canvas_manager = canvasManager.value;
+        const blob = await canvas_manager.getImageBlob(); // WebGL2Proxy
+        const url = URL.createObjectURL(blob);
 
-          // Revoke old Blob URL if it exists
-          if (canvases.value[id].blobUrl) {
-            URL.revokeObjectURL(canvases.value[id].blobUrl);
-          }
-
-          canvases.value[id].blobUrl = newUrl;
-          canvases.value[id].canvasImage = newUrl;
-        } catch (err) {
-          console.error(`Failed to get image blob for ${id}`, err);
+        if (canvases.value[id].blobUrl) {
+          URL.revokeObjectURL(canvases.value[id].blobUrl);
         }
+
+        canvases.value[id].blobUrl = url;
+        canvases.value[id].canvasImage = url;
+
+      } catch (err) {
+        console.error(`Failed to get canvas image for ${id}`, err);
+        throw err;
+      }
+    };
+
+    const getCanvasImageBitmap = async (id) => {
+      if (!canvases.value[id]) return;
+
+      try {
+        const canvas_manager = canvasManager.value;
+        const bitmap = await canvas_manager.getImageBitmap(); // WebGL2Proxy
+
+        // Create a visible canvas to draw the bitmap into
+        const ocanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        ocanvas.getContext('bitmaprenderer').transferFromImageBitmap(bitmap);
+        const blob = await ocanvas.convertToBlob({ type: 'image/webp' });
+        const url = URL.createObjectURL(blob);
+
+        if (canvases.value[id].blobUrl) {
+          URL.revokeObjectURL(canvases.value[id].blobUrl);
+        }
+
+        canvases.value[id].blobUrl = url;
+        canvases.value[id].canvasImage = url;
+
+      } catch (err) {
+        console.error(`Failed to get canvas image bitmap for ${id}`, err);
+        throw err;
       }
     };
 
@@ -156,7 +218,8 @@ export default {
       createCanvas,
       drawOnCanvas,
       clearCanvas,
-      getCanvasImage,
+      getCanvasImageBlob,
+      getCanvasImageBitmap,
       canvases,
     };
   },
