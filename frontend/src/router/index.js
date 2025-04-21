@@ -11,6 +11,7 @@ const router = createRouter({
     },
     { path: '/map-explorer', component: () => import('../views/MapExplorerStepsView.vue') },
     { path: '/map-explorer-webgl-temp', component: () => import('../views/MapExplorerStepsViewWebglTemp.vue') },
+    { path: '/map-explorer-webgl-temp-2', component: () => import('../views/MapExplorerStepsViewWebglTemp2.vue') },
     { path: '/map-explorer/:seed', component: () => import('../views/MapExplorerStepsView.vue') },
     { path: '/map-explorer-webgl-leaflet', component: () => import('../views/MapExplorerStepsViewWebGlLeaflet.vue') },
     // { path: '/map-explorer', component: () => import('../views/MapExplorerView.vue') },
