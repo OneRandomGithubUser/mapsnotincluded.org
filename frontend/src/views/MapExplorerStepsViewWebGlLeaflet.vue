@@ -470,6 +470,14 @@ const initializeWebGL = () => {
         numCellsWorldWidth.value = images[0].width;
         numCellsWorldHeight.value = images[0].height;
 
+        const numMapUnitsWorldWidth = numCellsWorldWidth.value / ZOOM_0_CELLS_PER_MAP_UNIT;
+        const numMapUnitsWorldHeight = numCellsWorldHeight.value / ZOOM_0_CELLS_PER_MAP_UNIT;
+        const NUM_WORLD_DISTANCES_BEYOND_BOUNDS = 2;
+        const bounds =
+            [[(-NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldWidth, (-NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldHeight],
+              [(1 + NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldWidth, (1 + NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldHeight]];
+        map.value.setMaxBounds(bounds); // TODO: change?
+
         const worldCenterX = numCellsWorldWidth.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
         const worldCenterY = -numCellsWorldHeight.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
         const worldCenterLatLong = [worldCenterY, worldCenterX];
