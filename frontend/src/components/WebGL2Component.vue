@@ -73,7 +73,9 @@ export default {
           "/elementIdx8.png",
           "/temperature32.png",
           "/mass32.png",
-          "/element_data_1x1.png"
+          "/element_data_1x1.png",
+          "/space_00.png",
+          "/space_01.png"
         ];
 
         for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {

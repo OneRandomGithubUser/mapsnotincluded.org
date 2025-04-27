@@ -422,11 +422,17 @@ function getOffsetTileUrl(coords, elementId) {
 
 const map = ref(null);
 const webGLCanvas = ref(null); // Store single WebGL2Proxy instance
-const numCellsWorldWidth = ref(0);
-const numCellsWorldHeight = ref(0);
+let webGLInitPromise = null;
+const numCellsWorldWidth = ref(null);
+const numCellsWorldHeight = ref(null);
 
 const initializeWebGL = () => {
-  return new Promise(async (resolve) => {
+  if (webGLInitPromise) {
+    // Initialization is already happening or finished, reuse it
+    return webGLInitPromise;
+  }
+
+  webGLInitPromise = new Promise(async (resolve) => {
     if (!webGLCanvas.value) {
       {
         console.log("Initializing canvas manager");
@@ -443,7 +449,9 @@ const initializeWebGL = () => {
           "/elementIdx8.png",
           "/temperature32.png",
           "/mass32.png",
-          "/element_data_1x1.png"
+          "/element_data_1x1.png",
+          "/space_00.png",
+          "/space_01.png"
         ];
 
         for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
@@ -460,6 +468,13 @@ const initializeWebGL = () => {
 
         numCellsWorldWidth.value = images[0].width;
         numCellsWorldHeight.value = images[0].height;
+
+        const worldCenterX = numCellsWorldWidth.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
+        const worldCenterY = -numCellsWorldHeight.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
+        const worldCenterLatLong = [worldCenterY, worldCenterX];
+        map.value.setView(worldCenterLatLong, 4)
+        console.log(worldCenterLatLong, "worldCenterLatLong");
+
         await canvas_manager.setup(imageBitmaps);
         console.log("Created canvas manager!");
       }/*
@@ -496,6 +511,8 @@ const initializeWebGL = () => {
       resolve(); // If already initialized, resolve immediately
     }
   });
+
+  return webGLInitPromise;
 };
 
 const drawDebugInfo = (ctx, coords, width, height) => {
@@ -605,75 +622,50 @@ const imageToBase64 = (img, type = "image/png") => {
 
 const initializeMap = () => {
   if (!map.value) {
-    const worldCenterX = numCellsWorldWidth.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
-    const worldCenterY = -numCellsWorldHeight.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
-    const worldCenterLatLong = [worldCenterY, worldCenterX];
-    console.log(worldCenterLatLong, "worldCenterLatLong");
 
     map.value = L.map("map", {
       crs: L.CRS.Simple,
-    }).setView(worldCenterLatLong, 4);
+    }).setView([0,0], 4);
+
+    L.TileLayer.PlaceholderLayer = L.TileLayer.extend({
+      getTileUrl: function(coords) {
+        return '/mode_nominal_256.png';
+      },
+      getAttribution: function() {
+        return "Klei Entertainment, Maps Not Included"
+      }
+    });
+
+    L.tileLayer.placeholderLayer = function (opts) {
+      return new L.TileLayer.PlaceholderLayer(opts);
+    };
+
+    L.tileLayer.placeholderLayer().addTo(map.value);
 
 
     L.GridLayer.MyCanvasLayer = L.GridLayer.extend({
       createTile: function (coords, done) {
-        if (!webGLCanvas.value) {
-          console.error("WebGL2Proxy is not initialized");
-          return;
-        }
+        // if (!webGLCanvas.value) {
+        //   console.error("WebGL2Proxy is not initialized");
+        //   return;
+        // }
 
-        var tile = document.createElement("canvas");
-        var size = this.getTileSize();
+        const tile = document.createElement("canvas");
+        const size = this.getTileSize();
         tile.width = size.x;
         tile.height = size.y;
         //var ctx = tile.getContext("2d");
 
-        const canvas_size = get_map_units_per_cell_from_zoom(coords.z);
-        const xy_scale = get_cells_per_zoom_0_map_tile_from_zoom(coords.z);
-        const x_offset = -1 * coords.x * xy_scale;
-        const y_offset = (coords.y + 1) * xy_scale - numCellsWorldHeight.value;
-
-
-
-        console.log("xyz", coords, canvas_size, xy_scale, x_offset, y_offset);
-
-        const callback = async () => {
-          console.log("Render Tile Callback");
-
-          try {
-            const bitmap = await webGLCanvas.value.transferImageBitmap();
-
-            // const ocanvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-
-            // ctx.drawImage(webGLCanvas.value.canvas, 0, 0, size.x, size.y);
-
-            const debugOutlines = true;
-            const debugUrlPrint = false;
-
-            if (debugOutlines) {
-              const tile_2d_ctx = tile.getContext('2d');
-              tile_2d_ctx.drawImage(bitmap, 0, 0);
-              drawDebugInfo(tile_2d_ctx, coords, size.x, size.y);
-            } else {
-              const tile_bmp_ctx = tile.getContext('bitmaprenderer');
-              tile_bmp_ctx.transferFromImageBitmap(bitmap);
-            }
-
-            if (debugUrlPrint) {
-              canvasToBase64(tile).then((base64) => {
-                console.log(`Tile (${coords.x},${coords.y},${coords.z}) base64:`, base64);
-              });
-            }
-
-            done(null, tile);
-          } catch (err) {
-            console.error(`Failed to get canvas image bitmap`, err);
-            throw err;
-          }
-        };
-
         // ✅ Wait for WebGL setup before rendering
         initializeWebGL().then(async () => {
+
+          const canvas_size = get_map_units_per_cell_from_zoom(coords.z);
+          const xy_scale = get_cells_per_zoom_0_map_tile_from_zoom(coords.z);
+          const x_offset = -1 * coords.x * xy_scale;
+          const y_offset = (coords.y + 1) * xy_scale - numCellsWorldHeight.value;
+
+          console.log("xyz", coords, canvas_size, xy_scale, x_offset, y_offset);
+
           console.log("begin render");
           const [_, bitmap] = await webGLCanvas.value
               .sequence()
@@ -708,6 +700,8 @@ const initializeMap = () => {
               });
             }
 
+            //tileWrapper.replaceChild(tile, placeholder);
+            //done(null, tileWrapper);
             done(null, tile);
           } catch (err) {
             console.error(`Failed to get canvas image bitmap`, err);
@@ -716,6 +710,9 @@ const initializeMap = () => {
         });
 
         return tile;
+      },
+      getAttribution: function() {
+        return "Klei Entertainment, Maps Not Included"
       },
     });
 
@@ -780,11 +777,11 @@ async function lowPriorityTasks() {
 
 // Initialize color data before map starts
 async function initializeApp() {
-    await loadColorData(); // Preload color mappings
-    await loadValidElementIdxImages(); // Preload valid element idx images
-    await loadImageData(); // Ensure image data is loaded first
+    // await loadColorData(); // Preload color mappings
+    // await loadValidElementIdxImages(); // Preload valid element idx images
+    // await loadImageData(); // Ensure image data is loaded first
     // await preloadMipmaps(); // Preload mipmaps
-    await initializeWebGL();
+    // await initializeWebGL();
     await initializeMap(); // Then initialize the map
     const testZoom = 5;
     const startTime = performance.now();

@@ -363,7 +363,13 @@ export default class WebGL2CanvasManager {
         // NOTE: assumption that the elementDataImageAtlas is a horizontal strip of 1x1 images. row 1 is the ui overlay color, row 2 is the element texture index (0-255, or invisible if there is none)
         // TODO: does this need to be a texture array?
 
-        const naturalTilesImageAtlas = images.slice(4, 15);
+        const SPACE_TEXTURE_SIZE = 1024;
+        const spaceBackgroundImages = images.slice(4, 6);
+        const spaceImagesWrapper = new TextureArray(spaceBackgroundImages);
+        const { textures: spaceTextures } = this.setupTextures(spaceBackgroundImages);
+        const spaceTextureArray = this.setupTextureArray(spaceImagesWrapper, true, false);
+
+        const naturalTilesImageAtlas = images.slice(6, 17);
         let naturalTilesImageAtlasTemp : TextureAtlas[] = []; // TODO: remove temp
         const getNaturalTileAtlasBounds = (layerIndex: number, mipmapIndex: number) => {
             const textureSize = this.NATURAL_TILES_TEXTURE_SIZE / (2 ** mipmapIndex);
@@ -384,7 +390,7 @@ export default class WebGL2CanvasManager {
         // Tell it to use our program (pair of shaders)
         gl.useProgram(this.program);
 
-        this.bindTextureToUnit(worldDataTextures[0], images[0], "u_world_data_image_elementIdx8", 0);
+        this.bindTextureToUnit(worldDataTextures[0], "u_world_data_image_elementIdx8", 0);
         // TODO: readd if necessary
         //this.bindTextureToUnit(worldDataTextures[1], images[1], "u_world_data_image_temperature32", 1);
         //this.bindTextureToUnit(worldDataTextures[2], images[2], "u_world_data_image_mass32", 2);
@@ -392,6 +398,9 @@ export default class WebGL2CanvasManager {
         this.bindTextureArrayToUnit(worldEtmTextureArray, "u_world_data_image_array", 3);
         this.bindTextureArrayToUnit(elementDataTextureArray, "u_element_data_image_array", 4);
         this.bindTextureArrayToUnit(naturalTilesTextureArray, "u_natural_tile_image_array", 5);
+        this.bindTextureArrayToUnit(spaceTextureArray, "u_space_image_array", 6);
+
+        console.log("Checking WebGL errors at the end of setup():", gl.getError());
     }
     render(
         numCellsWorldWidth: number,
@@ -406,6 +415,24 @@ export default class WebGL2CanvasManager {
         const gl = this.gl;
 
         this.resizeCanvas(canvas_width, canvas_height);
+        this.resetCanvasState();
+
+        // Tell it to use our program (pair of shaders)
+        gl.useProgram(this.program);
+
+        // --- Phase 1: draw full-screen background ---
+        // TODO: make space background follow the Leaflet map, not individual Leaflet tiles
+        this.updatePositionBuffer(this.positionBuffer, 0, 0, canvas_width, canvas_height);
+        this.bind2UniformFloatsToUnit(canvas_width, canvas_height, this.RESOLUTION_LOCATION_NAME);
+
+        this.bind1UniformFloatsToUnit(0.0, "u_lod_level"); // lod not needed for background
+        this.bind2UniformFloatsToUnit(1.0, 1.0, "u_natural_texture_tiles_per_cell"); // identity mapping
+        this.setFramebuffer(null, canvas_width, canvas_height, this.RESOLUTION_LOCATION_NAME);
+        this.bindUniformBoolToUnit(true, "u_rendering_background"); // for foreground/world pass
+        this.drawScene();
+
+        // --- Phase 2: draw world on top ---
+        // TODO: make space background consistent in first and second pass, possibly with frame buffers
 
         // Set a rectangle the same size as the image.
         // NOTE: assumes that the world data images are the same size and are the same size as the world
@@ -422,11 +449,6 @@ export default class WebGL2CanvasManager {
             num_pixels_world_height
         );
 
-        this.resetCanvasState();
-
-        // Tell it to use our program (pair of shaders)
-        gl.useProgram(this.program);
-
         // Pass in the canvas resolution so we can convert from pixels to clip space in the shader
         this.bind2UniformFloatsToUnit(gl.canvas.width, gl.canvas.height, this.RESOLUTION_LOCATION_NAME);
 
@@ -435,6 +457,7 @@ export default class WebGL2CanvasManager {
         const lodLevel = this.computeLodLevel(num_cells_width, num_cells_height, NATURAL_TEXTURE_TILES_PER_CELL_X, NATURAL_TEXTURE_TILES_PER_CELL_Y);
         this.bind1UniformFloatsToUnit(lodLevel, "u_lod_level");
         this.bind2UniformFloatsToUnit(NATURAL_TEXTURE_TILES_PER_CELL_X, NATURAL_TEXTURE_TILES_PER_CELL_Y, "u_natural_texture_tiles_per_cell");
+        this.bindUniformBoolToUnit(false, "u_rendering_background"); // for foreground/world pass
 
         // Calling gl.bindFramebuffer with null tells WebGL to render to the canvas instead of one of the framebuffers.
         this.setFramebuffer(null, gl.canvas.width, gl.canvas.height, this.RESOLUTION_LOCATION_NAME);
@@ -499,9 +522,11 @@ precision highp sampler2DArray;
 uniform sampler2DArray u_world_data_image_array;
 uniform sampler2DArray u_element_data_image_array;
 uniform sampler2DArray u_natural_tile_image_array;
+uniform sampler2DArray u_space_image_array;
 
 uniform float u_lod_level;
 uniform vec2 u_natural_texture_tiles_per_cell;
+uniform bool u_rendering_background;
 
 // the texCoords passed in from the vertex shader.
 in vec2 v_texCoord;
@@ -584,6 +609,13 @@ vec2 pairwise_mult(vec2 vector_1, vec2 vector_2) {
 }
 
 void main() {
+    if (u_rendering_background) {
+        vec2 cellTexCoord = v_texCoord;
+        vec4 space_background = texture(u_space_image_array, vec3(cellTexCoord, 0));
+        vec4 space_foreground = texture(u_space_image_array, vec3(cellTexCoord, 1));
+        outColor = space_background + space_foreground;
+    } else {
+    
     // TODO: half-pixel correction
     // Look up a color from the texture.
     vec4 color = texture(u_world_data_image_array, vec3(v_texCoord, 0)); // Layer 0 = elementIdx8
@@ -628,9 +660,15 @@ void main() {
     // outColor = vec4((color.rgb + downPixelColor.rgb)/2.0, 1);
     // outColor = vec4(color.rgb, 1);
     // outColor = floatToRGBA(floatValue);
-    outColor = naturalTileTexture;
-    // outColor = (  vec4(uiOverlayColor.rgb, 1) + vec4(floatToRGBA(floatValue).rgb, 1)   ) / 2.0;
+    vec4 foreground = naturalTileTexture;
+    
+    vec4 space_background = texture(u_space_image_array, vec3(v_texCoord, 0));
+    vec4 space_foreground = texture(u_space_image_array, vec3(v_texCoord, 1));
+    vec4 space_texture = space_background + space_foreground;
+    
+    outColor = mix(space_texture, foreground, foreground.a);
 
+    }
     
 }
 `;
@@ -690,6 +728,41 @@ void main() {
         }
 
         return { program, vertexShader, fragmentShader };
+    }
+
+    setupFramebufferTexture(width: number, height: number) {
+        // TODO: rendering options
+        const gl = this.gl;
+
+        const framebuffer = gl.createFramebuffer();
+        if (framebuffer === undefined || framebuffer === null) {
+            console.error("WebGL2CanvasManager: Failed to create background framebuffer.");
+            throw new Error("WebGL2CanvasManager: Failed to create background framebuffer.");
+        }
+        const texture = gl.createTexture();
+        if (texture === undefined || texture === null) {
+            console.error("WebGL2CanvasManager: Failed to create background texture.");
+            throw new Error("WebGL2CanvasManager: Failed to create background texture.");
+        }
+
+        // Bind and configure the background texture
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+        // Attach the texture to the framebuffer
+        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+
+        // Cleanup
+        gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+
+        return { framebuffer, texture };
+
     }
 
     setupPositionBuffer(position_location: string,
@@ -918,7 +991,6 @@ void main() {
     }
 
     bindTextureToUnit(texture: WebGLTexture,
-                      image: TexImageSource,
                       glsl_location: string,
                       texture_unit_index: number) : void {
         const gl = this.gl;
@@ -1131,6 +1203,12 @@ void main() {
 
         // Pass the screen size to the shader
         gl.uniform2f(u_uniform_location, a, b);
+    }
+
+    bindUniformBoolToUnit(value: boolean, uniformLocation: string): void {
+        const gl = this.gl;
+        const loc = gl.getUniformLocation(this.program, uniformLocation);
+        gl.uniform1i(loc, value ? 1 : 0);
     }
 
     computeLodLevel(renderedCellsX: number,
