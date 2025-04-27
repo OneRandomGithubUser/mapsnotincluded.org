@@ -362,6 +362,7 @@ function loadImage(url) {
 
 // TODO: typescript define classes for map units, zoom 0 map tiles (256 map units), cells, display pixels, natural texture tiles, natural texture pixels
 const ZOOM_0_CELLS_PER_MAP_UNIT = 8; // Base tile size for the map - this is purposefully not 1 to make sure code accounts for this!!
+const METERS_PER_CELL = 1;
 const MAP_UNITS_PER_ZOOM_0_MAP_TILE = 256; // Leaflet default
 const ZOOM_0_CELLS_PER_ZOOM_0_MAP_TILE = ZOOM_0_CELLS_PER_MAP_UNIT * MAP_UNITS_PER_ZOOM_0_MAP_TILE; // Make sure dimensional analysis checks out!!
 const CELLS_PER_NATURAL_TEXTURE_TILE = 8; // Number of cells per texture tile, lengthwise
@@ -622,9 +623,20 @@ const imageToBase64 = (img, type = "image/png") => {
 
 const initializeMap = () => {
   if (!map.value) {
+    const MapsNotIncludedCRS = L.extend({}, L.CRS.Simple, {
+      distance: function (latlng1, latlng2) {
+        const dx = latlng2.lng - latlng1.lng;
+        const dy = latlng2.lat - latlng1.lat;
+        const mapUnitsDistance = Math.sqrt(dx * dx + dy * dy);
+
+        const METERS_PER_MAP_UNIT = ZOOM_0_CELLS_PER_MAP_UNIT * METERS_PER_CELL;
+
+        return mapUnitsDistance * METERS_PER_MAP_UNIT;
+      }
+    });
 
     map.value = L.map("map", {
-      crs: L.CRS.Simple,
+      crs: MapsNotIncludedCRS,
     }).setView([0,0], 4);
 
     L.TileLayer.PlaceholderLayer = L.TileLayer.extend({
@@ -721,12 +733,8 @@ const initializeMap = () => {
     };
 
     L.gridLayer.myCanvasLayer().addTo(map.value);
+    L.control.scale().addTo(map.value);
   }
-
-
-let bounds = [[0, 0], [imageWidth, imageHeight]];
-//initialMap.value.setMaxBounds(bounds); // TODO: change?
-
 }
 
 let colorMap = {}; // Store preloaded ID-to-HEX mappings
