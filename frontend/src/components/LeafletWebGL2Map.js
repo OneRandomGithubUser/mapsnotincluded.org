@@ -1,6 +1,6 @@
 import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";
 import {loadImagesAsync} from "@/components/LoadImage";
-import canvasToBase64 from "@/components/CanvasToBase64";
+import { canvasToBase64 } from "@/components/MediaToBase64";
 
 import { onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -244,7 +244,7 @@ const initializeMap = () => {
                     try {
 
                         const debugOutlines = true;
-                        const debugUrlPrint = false;
+                        const debugUrlPrint = true;
 
                         if (debugOutlines) {
                             const tile_2d_ctx = tile.getContext('2d');
