@@ -18,6 +18,7 @@ app.use(cors({
     if (allowedDomains.indexOf(origin) !== -1) {
       return callback(null, true);
     } else {
+      console.error(`CORS error: ${origin} is not allowed`);
       return callback(new Error('Not allowed by CORS'));
     }
   }
