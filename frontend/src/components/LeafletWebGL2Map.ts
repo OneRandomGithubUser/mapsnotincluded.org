@@ -15,8 +15,9 @@ interface TileCoords {
     z: number;
 }
 
-const debugOutlines = false;
-const debugUrlPrint = false;
+const DEBUG_OUTLINES = false;
+const DEBUG_URL_PRINT = false;
+const DEBUG_TILE_TIMING = false; // enable/disable debug timings
 
 const ZOOM_0_CELLS_PER_MAP_UNIT = 8; // Base tile size for the map - this is purposefully not 1 to make sure code accounts for this!!
 const METERS_PER_CELL = 1;
@@ -206,6 +207,8 @@ const initializeMap = (): void => {
                 tile.height = size.y;
 
                 initializeWebGL().then(async () => {
+                    const startTime = DEBUG_TILE_TIMING ? performance.now() : 0;
+
                     const canvasSize = get_map_units_per_cell_from_zoom(coords.z);
                     const xyScale = get_cells_per_zoom_0_map_tile_from_zoom(coords.z);
                     const xOffset = -1 * coords.x * xyScale;
@@ -223,7 +226,7 @@ const initializeMap = (): void => {
 
                     try {
 
-                        if (debugOutlines) {
+                        if (DEBUG_OUTLINES) {
                             const ctx = tile.getContext("2d")!;
                             ctx.drawImage(bitmap, 0, 0);
                             drawDebugInfo(ctx, coords, size.x, size.y);
@@ -232,10 +235,15 @@ const initializeMap = (): void => {
                             ctx.transferFromImageBitmap(bitmap);
                         }
 
-                        if (debugUrlPrint) {
+                        if (DEBUG_URL_PRINT) {
                             canvasToBase64(tile).then(base64 => {
                                 console.log(`Tile (${coords.x},${coords.y},${coords.z}) base64:`, base64);
                             });
+                        }
+
+                        if (DEBUG_TILE_TIMING) {
+                            const endTime = performance.now();
+                            console.log(`Tile (${coords.x},${coords.y},${coords.z}) rendered in ${(endTime - startTime).toFixed(2)} ms`);
                         }
 
                         done(null, tile);
