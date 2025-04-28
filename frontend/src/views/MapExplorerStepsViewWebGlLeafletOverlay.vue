@@ -19,7 +19,7 @@ import "leaflet/dist/leaflet.css"
 import * as L from 'leaflet';
 
 import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2.ts";
-import {initializeMap} from "@/components/LeafletWebGL2Map.js"
+import {initializeMap} from "@/components/LeafletWebGL2Map.ts"
 console.log(initializeMap);
 import {loadImagesAsync} from "@/components/LoadImage"; // Import the class
 
