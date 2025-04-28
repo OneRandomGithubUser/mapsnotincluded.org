@@ -49,7 +49,7 @@ class SequenceBuilder<T extends any[] = []> {
 
 
 export interface IWebGL2AsyncManager {
-    setup(images: HTMLImageElement[]): Promise<void>;
+    setup(images: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[]): Promise<void>;
     render(...args: any[]): Promise<void>;
     clearCanvas(): Promise<void>;
     copyImageBlob(options?: ImageEncodeOptions): Promise<Blob>;

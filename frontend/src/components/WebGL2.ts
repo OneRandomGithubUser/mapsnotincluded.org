@@ -328,7 +328,7 @@ export default class WebGL2CanvasManager {
         this.RESOLUTION_LOCATION_NAME = "u_resolution";
     }
     setup(
-        images: HTMLImageElement[]
+        images: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[]
     ) : void {
         // TODO: lazy texture loading with large images
         const gl = this.gl;
