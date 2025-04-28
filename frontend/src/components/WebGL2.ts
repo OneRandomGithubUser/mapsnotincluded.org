@@ -1,8 +1,5 @@
 // Confused? See https://webgl2fundamentals.org/webgl/lessons/webgl-fundamentals.html.
 
-import { loadImages } from "./LoadImage";
-
-
 function getCanvasImageSourceDims(
     source: TexImageSource
 ): {
