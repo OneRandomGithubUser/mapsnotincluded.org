@@ -19,8 +19,8 @@ import "leaflet/dist/leaflet.css"
 import * as L from 'leaflet';
 
 import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2.ts";
-import {initializeMap} from "@/components/LeafletWebGL2Map.ts"
-console.log(initializeMap);
+import {initializeMap as initializeLeafletWebGL2Map} from "@/components/LeafletWebGL2Map";
+// import {initializeApp as initializeLeafletCanvasMap} from "@/components/LeafletCanvasMap.js";
 import {loadImagesAsync} from "@/components/LoadImage"; // Import the class
 
 const route = useRoute();
@@ -53,7 +53,7 @@ onMounted(() => {
   iframeUrl.value = url;
 
   // Start the map
-  initializeMap();
+  initializeLeafletWebGL2Map();
   
 })
 </script>
