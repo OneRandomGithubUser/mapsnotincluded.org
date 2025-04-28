@@ -15,11 +15,8 @@ interface TileCoords {
     z: number;
 }
 
-const map = ref<L.Map | null>(null);
-const webGLCanvas = ref<WebGL2Proxy | null>(null);
-let webGLInitPromise: Promise<void> | null = null;
-const numCellsWorldWidth = ref<number | null>(null);
-const numCellsWorldHeight = ref<number | null>(null);
+const debugOutlines = false;
+const debugUrlPrint = false;
 
 const ZOOM_0_CELLS_PER_MAP_UNIT = 8; // Base tile size for the map - this is purposefully not 1 to make sure code accounts for this!!
 const METERS_PER_CELL = 1;
@@ -28,6 +25,12 @@ const ZOOM_0_CELLS_PER_ZOOM_0_MAP_TILE = ZOOM_0_CELLS_PER_MAP_UNIT * MAP_UNITS_P
 const CELLS_PER_NATURAL_TEXTURE_TILE = 8; // Number of cells per texture tile, lengthwise
 const MAX_LOSSLESS_MAP_UNITS_PER_CELL = 128; // Maximum size per cell
 const MAX_LOSSLESS_ZOOM = get_zoom_from_map_units_per_cell(MAX_LOSSLESS_MAP_UNITS_PER_CELL); // Maximum zoom level for lossless tiles
+
+const map = ref<L.Map | null>(null);
+const webGLCanvas = ref<WebGL2Proxy | null>(null);
+let webGLInitPromise: Promise<void> | null = null;
+const numCellsWorldWidth = ref<number | null>(null);
+const numCellsWorldHeight = ref<number | null>(null);
 
 function get_map_units_per_cell_from_zoom(zoom: number): number {
     return 2 ** zoom;
@@ -219,8 +222,6 @@ const initializeMap = (): void => {
                         .exec();
 
                     try {
-                        const debugOutlines = true;
-                        const debugUrlPrint = true;
 
                         if (debugOutlines) {
                             const ctx = tile.getContext("2d")!;
