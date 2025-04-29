@@ -185,7 +185,7 @@ const initializeMap = (): void => {
             }
         });
 
-        map.value = L.map("map", { crs: MapsNotIncludedCRS }).setView([0, 0], 4);
+        map.value = L.map("map", { crs: MapsNotIncludedCRS, minZoom: -5, maxZoom: 20, zoomSnap: 0 }).setView([0, 0], 4);
 
         const PlaceholderLayer = L.TileLayer.extend({
             getTileUrl(_coords: TileCoords): string {
@@ -264,6 +264,80 @@ const initializeMap = (): void => {
         (L.gridLayer as any).myCanvasLayer().addTo(map.value);
 
         L.control.scale().addTo(map.value);
+
+        // add more units to the Leaflet scale
+        L.Control.Scale.include({
+
+            _updateMetric: function (maxMeters: number) {
+                let meters = this._getRoundNum(maxMeters);
+                let label = '';
+                let ratio = 1;
+
+                if (maxMeters >= 1000) {
+                    label = (meters / 1000) + ' km';
+                    ratio = (meters / 1000) * 1000 / maxMeters;
+                } else if (maxMeters >= 1) {
+                    label = meters + ' m';
+                    ratio = meters / maxMeters;
+                } else if (maxMeters >= 0.01) {
+                    let cm = this._getRoundNum(maxMeters * 100);
+                    label = cm + ' cm';
+                    ratio = cm / 100 / maxMeters;
+                } else if (maxMeters >= 0.001) {
+                    let mm = this._getRoundNum(maxMeters * 1000);
+                    label = mm + ' mm';
+                    ratio = mm / 1000 / maxMeters;
+                } else if (maxMeters >= 1e-6) {
+                    let um = this._getRoundNum(maxMeters * 1e6);
+                    label = um + ' μm';
+                    ratio = um / 1e6 / maxMeters;
+                } else if (maxMeters >= 1e-9) {
+                    let nm = this._getRoundNum(maxMeters * 1e9);
+                    label = nm + ' nm';
+                    ratio = nm / 1e9 / maxMeters;
+                } else if (maxMeters >= 1e-10) {
+                    let ang = this._getRoundNum(maxMeters * 1e10);
+                    label = ang + ' Å';
+                    ratio = ang / 1e10 / maxMeters;
+                } else {
+                    let pm = this._getRoundNum(maxMeters * 1e12);
+                    label = pm + ' pm';
+                    ratio = pm / 1e12 / maxMeters;
+                }
+
+                this._updateScale(this._mScale, label, ratio);
+            },
+
+            _updateImperial: function (maxMeters: number) {
+                const feet = maxMeters * 3.2808399;
+                const inches = maxMeters * 39.3700787;
+                const mils = inches * 1000;
+                let label = '';
+                let ratio = 1;
+
+                if (feet >= 5280) {
+                    let miles = this._getRoundNum(feet / 5280);
+                    label = miles + ' mi';
+                    ratio = miles * 5280 / feet;
+                } else if (feet >= 1) {
+                    let f = this._getRoundNum(feet);
+                    label = f + ' ft';
+                    ratio = f / feet;
+                } else if (inches >= 1) {
+                    let inch = this._getRoundNum(inches);
+                    label = inch + ' in';
+                    ratio = inch / inches;
+                } else {
+                    let m = this._getRoundNum(mils);
+                    label = m + ' mil';
+                    ratio = m / mils;
+                }
+
+                this._updateScale(this._iScale, label, ratio);
+            }
+
+        });
+
     }
 };
 
