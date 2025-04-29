@@ -267,4 +267,4 @@ const initializeMap = (): void => {
     }
 };
 
-export { initializeMap };
+export { initializeMap, map };
