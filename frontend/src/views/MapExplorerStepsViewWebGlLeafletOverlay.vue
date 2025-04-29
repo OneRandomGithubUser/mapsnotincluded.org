@@ -13,7 +13,7 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
@@ -26,90 +26,18 @@ import * as L from 'leaflet';
 import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2.ts";
 import {initializeMap as initializeLeafletWebGL2Map, map as LeafletWebGL2Map} from "@/components/LeafletWebGL2Map";
 // import {initializeApp as initializeLeafletCanvasMap} from "@/components/LeafletCanvasMap";
-import {loadImagesAsync} from "@/components/LoadImage"; // Import the class
+import { useLeafletMapSync } from "@/components/LeafletMessageBrowserIframe"
+import {loadImagesAsync} from "@/components/LoadImage";
 
 const route = useRoute();
 
 const MAPEXPLORER_URL = import.meta.env.VITE_MAPEXPLORER_URL || 'http://localhost:8080/'; // https://stefan-oltmann.de/oni-seed-browser';
 
-const iframeUrl = ref(null)
-const iframeRef = ref(null)
+const iframeUrl = ref(null);
 const queryParams = ref({});
-const mapSizesRef = ref(new Map());
 
-function requestLeafletBoxes() {
-  // Only send the message if the iframe is loaded
-  const iframe = iframeRef.value;
-  if (iframe && iframe.contentWindow) {
-    iframe.contentWindow.postMessage("getLeafletBoxes", "*");
-  }
-  requestAnimationFrame(requestLeafletBoxes); // Keep looping
-}
-
-// Start polling via requestAnimationFrame
-requestAnimationFrame(requestLeafletBoxes);
-
-// Listen for messages from the iframe
-window.addEventListener("message", (event) => {
-  if (event.data?.type === "leafletBoxes") {
-    try {
-      const boxes = JSON.parse(event.data.boxesJson);
-      const mapContainers = boxes["map-containers"];
-      const visibleScrollBounds = boxes["visible-scroll-bounds"];
-      const visible = boxes["visible"];
-      const mapClippingWrapper = document.getElementById("map-clipping-wrapper-1");
-      mapClippingWrapper.style.visibility = visible ? "visible" : "hidden";
-
-      if (mapContainers.length > 0) {
-        const { left: visLeft, top: visTop, right: visRight, bottom: visBottom } = visibleScrollBounds[0];
-        const { left, top, right, bottom, seed } = mapContainers[0];
-        const coordKey = seed;
-        const mapDiv = document.getElementById("map-container-1");
-
-        if (mapDiv) {
-          const mapWidth = right - left;
-          const mapHeight = bottom - top;
-          const offsetLeft = left - visLeft;
-          const offsetTop = top - visTop;
-
-          const visWidth = visRight - visLeft;
-          const visHeight = visBottom - visTop;
-
-          mapClippingWrapper.style.left = `${visLeft}px`;
-          mapClippingWrapper.style.top = `${visTop}px`;
-          mapClippingWrapper.style.width = `${visWidth}px`;
-          mapClippingWrapper.style.height = `${visHeight}px`;
-
-          mapDiv.style.left = `${offsetLeft}px`;
-          mapDiv.style.top = `${offsetTop}px`;
-          mapDiv.style.width = `${mapWidth}px`;
-          mapDiv.style.height = `${mapHeight}px`;
-
-          const mapSizes = mapSizesRef.value;
-
-          // Look up previous size
-          const prev = mapSizes.get(coordKey);
-
-          const hasSizeChanged = !prev || prev.mapWidth !== mapWidth || prev.mapHeight !== mapHeight;
-
-          if (hasSizeChanged) {
-            // Store new size
-            mapSizes.set(coordKey, { mapWidth, mapHeight });
-
-            // Trigger resize update
-            LeafletWebGL2Map.value.invalidateSize();
-          } else {
-            // Size unchanged; skipping invalidateSize
-          }
-        } else {
-          console.warn("No element with id 'map-container-a' found.");
-        }
-      }
-    } catch (err) {
-      console.error("Failed to parse leaflet boxes:", err);
-    }
-  }
-});
+const iframeRef = ref<HTMLIFrameElement | null>(null);
+const mapSizesRef = ref(new Map<string, { mapWidth: number; mapHeight: number }>());
 
 onMounted(() => {
 
@@ -135,6 +63,9 @@ onMounted(() => {
   // Start the map
   initializeLeafletWebGL2Map();
   // initializeLeafletCanvasMap();
+
+  // Sync the map sizes with the iframe
+  useLeafletMapSync(iframeRef, mapSizesRef, LeafletWebGL2Map);
   
 })
 </script>
