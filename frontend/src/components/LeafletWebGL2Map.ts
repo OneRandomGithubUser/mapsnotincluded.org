@@ -27,7 +27,40 @@ const CELLS_PER_NATURAL_TEXTURE_TILE = 8; // Number of cells per texture tile, l
 const MAX_LOSSLESS_MAP_UNITS_PER_CELL = 128; // Maximum size per cell
 const MAX_LOSSLESS_ZOOM = get_zoom_from_map_units_per_cell(MAX_LOSSLESS_MAP_UNITS_PER_CELL); // Maximum zoom level for lossless tiles
 
-const mapsRef = ref<Map<string, L.Map>>(new Map());
+class LeafletMapData {
+    private readonly map: L.map;
+    private isReadyToRender: boolean;
+    private setupPromise: Promise<void> | null;
+    constructor(
+        map: L.map
+    ) {
+        this.map = map;
+        this.isReadyToRender = false;
+        this.setupPromise = null;
+    }
+    getMap(): L.map {
+        return this.map;
+    }
+    getIsReadyToRender(): boolean {
+        return this.isReadyToRender;
+    }
+    setIsReadyToRender(isReadyToRender: boolean): void {
+        this.isReadyToRender = isReadyToRender;
+    }
+
+    getSetupPromise(): Promise<void> | null {
+        return this.setupPromise;
+    }
+
+    setSetupPromise(promise: Promise<void>): void {
+        this.setupPromise = promise;
+    }
+
+    clearSetupPromise(): void {
+        this.setupPromise = null;
+    }
+}
+const mapsRef = ref<Map<string, LeafletMapData>>(new Map());
 const webGLCanvas = ref<WebGL2Proxy | null>(null);
 let webGLInitPromise: Promise<void> | null = null;
 const numCellsWorldWidth = ref<number | null>(null);
@@ -49,7 +82,7 @@ function get_zoom_from_map_units_per_cell(size: number): number {
     return Math.log2(size);
 }
 
-const initializeWebGL = (leafletMap: L.map, seed: string): Promise<void> => {
+const initializeWebGL = (): Promise<void> => {
     if (webGLInitPromise) {
         return webGLInitPromise;
     }
@@ -136,7 +169,7 @@ const initializeWebGL = (leafletMap: L.map, seed: string): Promise<void> => {
                 elementDataImage: elementDataImage.bitmaps[0],
                 bgImages: bgImages.bitmaps,
                 tileImages: tileImages.bitmaps,
-            }).then(() => updateDataTextures(leafletMap, seed));
+            });
 
             console.log("Created canvas manager!");/*
       TODO: make sure
@@ -174,37 +207,76 @@ const initializeWebGL = (leafletMap: L.map, seed: string): Promise<void> => {
     return webGLInitPromise;
 };
 
-// TODO: remove this code duplication with initializeWebGL
-export async function updateDataTextures(leafletMap: L.map, seed: string) {
-    const base = `/world_data/${seed}`;
-    const urls = ["elementIdx8.png","temperature32.png","mass32.png"]
-        .map(p => `${base}/${p}`);
-    const bitmaps = await Promise.all(urls.map(u=>loadAndPad(u,1200,500)));
-    await webGLCanvas.value!.sequence().setup({ dataImages: bitmaps, seed: seed }).exec();
+export async function setupLeafletMap(
+    leafletMap: L.Map,
+    seed: string,
+    htmlId: string
+): Promise<void> {
+    const leafletMapData = mapsRef.value.get(htmlId);
+    if (!leafletMapData) {
+        throw new Error(`Map container with htmlId ${htmlId} not found.`);
+    }
 
-    numCellsWorldWidth.value = bitmaps[0].width;
-    numCellsWorldHeight.value = bitmaps[0].height;
+    // ✅ Already set up?
+    if (leafletMapData.getIsReadyToRender()) {
+        return;
+    }
 
-    const numMapUnitsWorldWidth = numCellsWorldWidth.value / ZOOM_0_CELLS_PER_MAP_UNIT;
-    const numMapUnitsWorldHeight = numCellsWorldHeight.value / ZOOM_0_CELLS_PER_MAP_UNIT;
-    const NUM_WORLD_DISTANCES_BEYOND_BOUNDS = 2;
-    const bounds: L.LatLngBoundsExpression = [
-        [
-            (-NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldWidth,
-            (-NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldHeight
-        ],
-        [
-            (1 + NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldWidth,
-            (1 + NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldHeight
-        ]
-    ];
-    leafletMap.setMaxBounds(bounds);
+    // ✅ Already being set up?
+    const existing = leafletMapData.getSetupPromise();
+    if (existing) {
+        await existing;
+        return;
+    }
 
-    const worldCenterX = numCellsWorldWidth.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
-    const worldCenterY = -numCellsWorldHeight.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
-    const worldCenterLatLong: [number, number] = [worldCenterY, worldCenterX];
-    leafletMap.setView(worldCenterLatLong, 4); // TODO: set view based on map size
+    // ✅ First caller — begin setup
+    const setup = (async () => {
+        const base = `/world_data/${seed}`;
+        const urls = ["elementIdx8.png", "temperature32.png", "mass32.png"]
+            .map(p => `${base}/${p}`);
+        const bitmaps = await Promise.all(urls.map(u => loadAndPad(u, 1200, 500)));
+
+        await webGLCanvas.value!.sequence().setup({ dataImages: bitmaps, seed }).exec();
+
+        numCellsWorldWidth.value = bitmaps[0].width;
+        numCellsWorldHeight.value = bitmaps[0].height;
+
+        const numMapUnitsWorldWidth = numCellsWorldWidth.value / ZOOM_0_CELLS_PER_MAP_UNIT;
+        const numMapUnitsWorldHeight = numCellsWorldHeight.value / ZOOM_0_CELLS_PER_MAP_UNIT;
+        const NUM_WORLD_DISTANCES_BEYOND_BOUNDS = 2;
+
+        const bounds: L.LatLngBoundsExpression = [
+            [
+                -NUM_WORLD_DISTANCES_BEYOND_BOUNDS * numMapUnitsWorldWidth,
+                -NUM_WORLD_DISTANCES_BEYOND_BOUNDS * numMapUnitsWorldHeight,
+            ],
+            [
+                (1 + NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldWidth,
+                (1 + NUM_WORLD_DISTANCES_BEYOND_BOUNDS) * numMapUnitsWorldHeight,
+            ],
+        ];
+
+        leafletMap.setMaxBounds(bounds);
+
+        // TODO: set view based on map size
+        const worldCenterX = numCellsWorldWidth.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
+        const worldCenterY = -numCellsWorldHeight.value / 2 / ZOOM_0_CELLS_PER_MAP_UNIT;
+        leafletMap.setView([worldCenterY, worldCenterX], 4);
+
+        leafletMapData.setIsReadyToRender(true);
+        leafletMapData.clearSetupPromise();
+    })();
+
+    leafletMapData.setSetupPromise(setup);
+
+    try {
+        await setup;
+    } catch (err) {
+        leafletMapData.clearSetupPromise(); // allow retry
+        throw err;
+    }
 }
+
 
 const drawErrorOverlay = (ctx: CanvasRenderingContext2D, width: number, height: number): void => {
     ctx.strokeStyle = "red";
@@ -256,7 +328,7 @@ const initializeMap = (htmlId: string, seed: string): L.map => {
     seed = Math.random() < 0.5 ? "V-BAD-C-433189014-0-0-0" : "M-BAD-C-147910338-0-0-0" // TODO: remove this hardcoded test seed
     // TODO: activeSeedsRef
     if (mapsRef.value.has(seed)) {
-        return mapsRef.value.get(seed)!;
+        return mapsRef.value.get(seed)!.getMap();
     }
     const MapsNotIncludedCRS: L.CRS = L.extend({}, L.CRS.Simple, {
         distance: (latlng1: L.LatLngExpression, latlng2: L.LatLngExpression): number => {
@@ -336,7 +408,7 @@ const initializeMap = (htmlId: string, seed: string): L.map => {
                     return tileWrapper;
                 }
 
-                initializeWebGL(leafletMap, seed).then(async () => {
+                initializeWebGL().then(async () => setupLeafletMap(leafletMap, seed, htmlId).then(async () => {
                     const startTime = DEBUG_TILE_TIMING ? performance.now() : 0;
 
                     const canvasSize = get_map_units_per_cell_from_zoom(coords.z);
@@ -383,7 +455,7 @@ const initializeMap = (htmlId: string, seed: string): L.map => {
                         createErrorTile(err);
                         done(err as Error, tile);
                     }
-                });
+                }));
             } catch (err) {
                 createErrorTile(err);
             }
@@ -475,7 +547,7 @@ const initializeMap = (htmlId: string, seed: string): L.map => {
 
     });
     // insert newly made map into maps
-    mapsRef.value.set(htmlId, leafletMap);
+    mapsRef.value.set(htmlId, new LeafletMapData(leafletMap));
     return leafletMap;
 }
 export const resizeMap = (htmlId: string): void => {
@@ -483,7 +555,7 @@ export const resizeMap = (htmlId: string): void => {
         console.error(`Map container with htmlId ${htmlId} not found.`);
         throw new Error(`Map container with htmlId ${htmlId} not found.`);
     }
-    const mapInstance = mapsRef.value.get(htmlId);
+    const mapInstance = mapsRef.value.get(htmlId)!.getMap();
     mapInstance.invalidateSize();
 }
 export const removeMap = (htmlId: string): void => {
@@ -491,7 +563,7 @@ export const removeMap = (htmlId: string): void => {
         console.error(`Map container with htmlId ${htmlId} not found. Only call removeMap() for cleanup.`);
         throw new Error(`Map container with htmlId ${htmlId} not found. Only call removeMap() for cleanup.`);
     }
-    const mapInstance = mapsRef.value.get(htmlId);
+    const mapInstance = mapsRef.value.get(htmlId)!.getMap();
     mapInstance.off();
     mapInstance.remove();
     mapsRef.value.delete(htmlId);
