@@ -369,10 +369,8 @@ export default class WebGL2CanvasManager {
         //this.setRectangle(positionBuffer, num_pixels_num_cells_left_edge_x, num_pixels_num_cells_bottom_edge_y, num_pixels_world_width, num_pixels_world_height);
 
         // provide texture coordinates for the rectangle.
-        console.log("opts", opts);
 
         if (opts) {
-            console.log("opts", opts)
             if (opts.dataImages) {
                 if (!opts.seed) {
                     this.throwError("Seed is required for data images.");
@@ -401,7 +399,6 @@ export default class WebGL2CanvasManager {
                 console.log(`World data images uploaded to texture array at slot ${slot} (index ${layerIdx}) for seed: ${seed}`);
             }
             if (opts.elementDataImage) {
-                console.log("opts.elementDataImage", opts.elementDataImage)
                 const elementDataImageAtlas = opts.elementDataImage;
                 const getElementDataAtlasBounds = (layerIndex: number) => {
                     return { x: layerIndex, y: 0, width: 1, height: 2 };
@@ -483,8 +480,7 @@ export default class WebGL2CanvasManager {
         // Set the currently rendering seed
         const layer = [...this.textureLRU.keys()].indexOf(seed);
         if (layer < 0) {
-            console.warn("Seed not loaded:", seed);
-            return;
+            this.throwError(`Seed not loaded: ${seed}`);
         }
         this.bind1UniformIntsToUnit(layer, "u_worldLayer");
 
@@ -798,7 +794,7 @@ void main() {
 
     private throwError(msg: string) {
         const prefixedMsg = `[WebGL2CanvasManager] ${msg}`;
-        this.throwError(prefixedMsg);
+        throw new Error(prefixedMsg);
     }
 
     private acquireTextureSlot(seed:string): number {
