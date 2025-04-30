@@ -38,6 +38,49 @@ export const imageToBase64 = async (img: HTMLImageElement, type: string = "image
     return canvasToBase64(canvas, type);
 };
 
+/**
+ * Convert an ImageBitmap to a Base-64 data-URL.
+ *
+ * @param bmp   ImageBitmap (or HTMLCanvasElement, OffscreenCanvas, etc.)
+ * @param type  MIME type for the result – default "image/png"
+ * @returns     Promise that resolves to `"data:image/…;base64,...."`
+ */
+export const bitmapToBase64 = async (
+    bmp: ImageBitmap | CanvasImageSource,
+    type: string = "image/png"
+): Promise<string> => {
+
+    // 1️⃣  Determine intrinsic size
+    const width  = (bmp as any).width  ?? 0;
+    const height = (bmp as any).height ?? 0;
+    if (width === 0 || height === 0) {
+        throw new Error("Bitmap has invalid dimensions or is not ready.");
+    }
+
+    // 2️⃣  Draw into a temporary canvas (OffscreenCanvas if available)
+    const canvas: HTMLCanvasElement | OffscreenCanvas =
+        typeof OffscreenCanvas !== "undefined"
+            ? new OffscreenCanvas(width, height)
+            : (() => {
+                const c = document.createElement("canvas");
+                c.width  = width;
+                c.height = height;
+                return c;
+            })();
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx || typeof ctx.drawImage !== "function") {
+        throw new Error("Canvas 2D context not available.");
+    }
+
+    ctx.drawImage(bmp, 0, 0);
+
+    // 3️⃣  Re-use existing helper
+    // OffscreenCanvas.convertToBlob is async; fallback for HTMLCanvas
+    return await canvasToBase64(canvas, type);
+};
+
+
 export const blobToBase64 = async (blob: Blob): Promise<string> => {
     const reader = new FileReader();
 
