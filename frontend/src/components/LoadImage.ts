@@ -47,4 +47,20 @@ const loadImagesAsync = async (urls: string[]): Promise<HTMLImageElement[]> => {
     return Promise.all(imagePromises);
 };
 
+export async function loadAndPad(
+    url: string,
+    w: number,
+    h: number
+): Promise<ImageBitmap> {
+    const img   = await loadImagePromise(url);
+    const cvs   = new OffscreenCanvas(w, h);
+    const ctx   = cvs.getContext("2d")!;
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0,0,w,h);
+    const x = (w - img.width )>>1;
+    const y = (h - img.height)>>1;
+    ctx.drawImage(img, x, y);
+    return cvs.transferToImageBitmap();
+}
+
 export { loadImagePromise as loadImage, loadImagesSync, loadImagesAsync };
