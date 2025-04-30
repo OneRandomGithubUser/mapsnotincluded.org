@@ -24,9 +24,13 @@ import "leaflet/dist/leaflet.css"
 import * as L from 'leaflet';
 
 import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2.ts";
-import {initializeMap as initializeLeafletWebGL2Map, mapsRef as LeafletWebGL2MapsRef} from "@/components/LeafletWebGL2Map";
+import {
+  initializeMap as initializeLeafletWebGL2Map,
+  LeafletWebGL2Map,
+  mapsRef as LeafletWebGL2MapsRef
+} from "@/components/LeafletWebGL2Map";
 // import {initializeApp as initializeLeafletCanvasMap} from "@/components/LeafletCanvasMap";
-import { useLeafletMapSync } from "@/components/LeafletMessageBrowserIframe"
+import {LeafletMessageBrowserIframe, useLeafletMapSync} from "@/components/LeafletMessageBrowserIframe"
 import {loadImagesAsync} from "@/components/LoadImage";
 
 const route = useRoute();
@@ -73,8 +77,18 @@ onMounted(() => {
   // initializeLeafletCanvasMap();
 
   // Sync the map sizes with the iframe
-  useLeafletMapSync(iframeRef, mapSizesRef, LeafletWebGL2MapsRef, activeSeedsRef, LeafletWebGL2MapsRef);
-
+  // useLeafletMapSync(iframeRef, mapSizesRef, LeafletWebGL2MapsRef, activeSeedsRef, LeafletWebGL2MapsRef);
+  const iframe = iframeRef.value;
+  if (!iframe) {
+    console.error("iframeRef is null");
+    throw new Error("iframeRef is null");
+  }
+  const leafletWebGL2Map = new LeafletWebGL2Map();
+  const leafletMessageBrowserIframe = new LeafletMessageBrowserIframe(
+      iframe,
+      mapClippingWrapper,
+      leafletWebGL2Map
+  );
 })
 </script>
 
