@@ -15,6 +15,7 @@ const router = createRouter({
     { path: '/map-explorer/:seed', component: () => import('../views/MapExplorerStepsView.vue') },
     { path: '/map-explorer-webgl-leaflet', component: () => import('../views/MapExplorerStepsViewWebGlLeaflet.vue') },
     { path: '/map-explorer-webgl-leaflet-overlay', component: () => import('../views/MapExplorerStepsViewWebGlLeafletOverlay.vue') },
+    { path: '/map-explorer-webgl-leaflet-overlay/:seed', component: () => import('../views/MapExplorerStepsViewWebGlLeafletOverlay.vue') },
     // { path: '/map-explorer', component: () => import('../views/MapExplorerView.vue') },
     //{ path: '/trait-finder', component: () => import('../views/WorldTraitFinderView.vue') },
     { path: '/trait-finder', component: () => import('../views/WorldTraitFinderSgtView.vue') },
