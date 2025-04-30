@@ -16,6 +16,12 @@ class SequenceBuilder<T extends any[] = []> {
 
     constructor(private proxy: WebGL2Proxy) {}
 
+    setup(...args: Parameters<WebGL2Proxy["setup"]>) {
+        this.actions.push({ type: "setup", args });
+        // unknown is needed, but even though the cast is safe (the types are controlled), TypeScript cannot prove it.
+        return this as unknown as SequenceBuilder<[...T, void]>;
+    }
+
     render(...args: Parameters<WebGL2Proxy["render"]>) {
         this.actions.push({ type: "render", args });
         // unknown is needed, but even though the cast is safe (the types are controlled), TypeScript cannot prove it.
@@ -49,8 +55,15 @@ class SequenceBuilder<T extends any[] = []> {
 
 
 export interface IWebGL2AsyncManager {
-    setup(images: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[]): Promise<void>;
-    render(...args: any[]): Promise<void>;
+    setup(opts?: {
+            dataImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+            elementDataImage?: HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+            bgImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+            tileImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+            seed?: string
+          }
+    ): Promise<void>;
+    render(...args: any[]): Promise<void>; // TODO: use a more specific type as defined in WebGL2CanvasManager
     clearCanvas(): Promise<void>;
     copyImageBlob(options?: ImageEncodeOptions): Promise<Blob>;
     transferImageBitmap(): Promise<ImageBitmap>;
@@ -88,11 +101,19 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
         });
     }
 
-    async setup(images: HTMLImageElement[]): Promise<void> {
-        await this.runSequence([{ type: "setup", args: [images] }]);
+    async setup(opts?: {
+                    dataImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+                    elementDataImage?: HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+                    bgImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+                    tileImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+                    seed?: string
+                }
+    ): Promise<void> {
+        await this.runSequence([{ type: "setup", args: [opts] }]);
     }
 
     async render(
+        seed: string,
         worldWidth: number,
         worldHeight: number,
         width: number,
