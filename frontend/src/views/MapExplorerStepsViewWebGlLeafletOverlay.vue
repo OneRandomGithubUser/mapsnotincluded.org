@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue';
+import {onBeforeUnmount, onMounted, ref, watch} from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 
@@ -25,12 +25,10 @@ import * as L from 'leaflet';
 
 import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";// "@/components/WebGL2.ts";
 import {
-  initializeMap as initializeLeafletWebGL2Map,
-  LeafletWebGL2Map,
-  mapsRef as LeafletWebGL2MapsRef
+  LeafletWebGL2Map
 } from "@/components/LeafletWebGL2Map";
 // import {initializeApp as initializeLeafletCanvasMap} from "@/components/LeafletCanvasMap";
-import {LeafletMessageBrowserIframe, useLeafletMapSync} from "@/components/LeafletMessageBrowserIframe"
+import {LeafletMessageBrowserIframe} from "@/components/LeafletMessageBrowserIframe"
 import {loadImagesAsync} from "@/components/LoadImage";
 
 const route = useRoute();
@@ -42,10 +40,11 @@ const queryParams = ref({});
 const mapClippingWrapperRef = ref<HTMLDivElement | null>(null);
 
 const iframeRef = ref<HTMLIFrameElement | null>(null);
-const mapSizesRef = ref(new Map<string, { mapWidth: number; mapHeight: number }>());
-const activeSeedsRef = ref<Set<string>>(new Set());
+const leafletWebGL2MapRef = ref<LeafletWebGL2Map | null>(null);
+const leafletMessageBrowserIframeRef = ref<LeafletMessageBrowserIframe | null>(null);
 
 onMounted(() => {
+  console.log("Mounting!");
 
   queryParams.value = { ...route.query, embedded: 'mni' };
 
@@ -73,23 +72,33 @@ onMounted(() => {
   }
 
   // Start the map
-  // initializeLeafletWebGL2Map(activeSeedsRef, "map");
   // initializeLeafletCanvasMap();
 
   // Sync the map sizes with the iframe
-  // useLeafletMapSync(iframeRef, mapSizesRef, LeafletWebGL2MapsRef, activeSeedsRef, LeafletWebGL2MapsRef);
   const iframe = iframeRef.value;
   if (!iframe) {
     console.error("iframeRef is null");
     throw new Error("iframeRef is null");
   }
   const leafletWebGL2Map = new LeafletWebGL2Map();
-  const leafletMessageBrowserIframe = new LeafletMessageBrowserIframe(
+  leafletWebGL2MapRef.value = leafletWebGL2Map;
+  leafletMessageBrowserIframeRef.value = new LeafletMessageBrowserIframe(
       iframe,
       mapClippingWrapper,
       leafletWebGL2Map
   );
 })
+onBeforeUnmount(() => {
+  console.log("Unmounting!");
+  if (leafletWebGL2MapRef.value) {
+    leafletWebGL2MapRef.value.removeAllMaps();
+  }
+  leafletWebGL2MapRef.value = null;
+  if (leafletMessageBrowserIframeRef.value) {
+    leafletMessageBrowserIframeRef.value.remove();
+  }
+  leafletMessageBrowserIframeRef.value = null;
+});
 </script>
 
 <style scoped>

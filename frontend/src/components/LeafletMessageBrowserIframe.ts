@@ -10,6 +10,7 @@ type LeafletBoxBounds = {
     right: number
     bottom: number
     seed: string
+    index: number
 }
 
 type VisibleScrollBounds = {
@@ -37,36 +38,48 @@ export class LeafletMessageBrowserIframe {
     private readonly leafletWebGl2Map: LeafletWebGL2Map;
     private readonly mapData: Map<string, MapSize>;
     private readonly mapClippingWrapper: HTMLDivElement;
+    private animationFrameId: number;
+    private readonly controller: AbortController;
 
     constructor(iframe: HTMLIFrameElement, mapClippingWrapper: HTMLDivElement, leafletWebGl2Map: LeafletWebGL2Map) {
         this.iframe = iframe;
         this.mapData = new Map<string, MapSize>();
         this.mapClippingWrapper = mapClippingWrapper;
         this.leafletWebGl2Map = leafletWebGl2Map;
+        this.controller = new AbortController();
 
-        requestAnimationFrame(this.requestLeafletBoxes.bind(this));
+        this.animationFrameId = requestAnimationFrame(this.requestLeafletBoxes.bind(this));
 
         window.addEventListener("message", (event: MessageEvent<LeafletBoxesMessage>) => {
-            if (event.data?.type === "leafletBoxes") {
-                this.parseLeafletBoxesData(event);
-            }
-        })
+                if (event.data?.type === "leafletBoxes") {
+                    this.parseLeafletBoxesData(event);
+                }
+            },
+            { signal: this.controller.signal }
+        )
     }
 
-    private setup() {
-        requestAnimationFrame(this.requestLeafletBoxes);
-
-        window.addEventListener("message", (event: MessageEvent<LeafletBoxesMessage>) => {
-            if (event.data?.type === "leafletBoxes") {
-                this.parseLeafletBoxesData(event);
-            }
-        })
+    public remove() {
+        cancelAnimationFrame(this.animationFrameId);
+        this.controller.abort();
     }
 
     private parseLeafletBoxesData(event: MessageEvent<LeafletBoxesMessage>) {
         try {
             const boxes = JSON.parse(event.data.boxesJson);
-            const mapContainers: LeafletBoxBounds[] = boxes["map-containers"];
+
+            // TODO: remove this debug code
+            const debugPredefinedSeeds = [
+                "V-BAD-C-433189014-0-0-0",
+                "invalid-seed",
+                "M-BAD-C-147910338-0-0-0"
+            ]
+            const mapContainers: LeafletBoxBounds[] = boxes["map-containers"].map((box: LeafletBoxBounds) => ({
+                ...box,
+                seed: debugPredefinedSeeds[box.index - 1] ?? null
+            }));
+            // const mapContainers: LeafletBoxBounds[] = boxes["map-containers"];
+
             const visibleScrollBounds: VisibleScrollBounds[] = boxes["visible-scroll-bounds"];
             const isVisible: boolean = boxes["visible"];
 
@@ -76,7 +89,6 @@ export class LeafletMessageBrowserIframe {
 
             const mapClippingWrapper = this.mapClippingWrapper;
             mapClippingWrapper.style.visibility = isVisible ? "visible" : "hidden";
-
             const newSeeds = new Set<string>(mapContainers.map(m => m.seed));
             const activeSeeds = new Set<string>(this.mapData.keys());
 
@@ -90,9 +102,9 @@ export class LeafletMessageBrowserIframe {
 
             const { left: visLeft, top: visTop, right: visRight, bottom: visBottom } = visibleScrollBounds[0]; // for now, assume there is only one visible scroll bounds
             for (const mapContainer of mapContainers) {
-                const {left, top, right, bottom, seed} = mapContainer;
+                const {left, top, right, bottom, seed, index} = mapContainer;
 
-                const coordKey = seed;
+                const coordKey = seed; // TODO: remove testing code
                 const mapContainerId = this.getMapContainerId(coordKey);
                 const mapDiv = document.getElementById(mapContainerId);
                 if (!mapDiv) {
@@ -208,6 +220,6 @@ export class LeafletMessageBrowserIframe {
         if (iframe?.contentWindow) {
             iframe.contentWindow.postMessage("getLeafletBoxes", "*");
         }
-        requestAnimationFrame(this.requestLeafletBoxes.bind(this));
+        this.animationFrameId = requestAnimationFrame(this.requestLeafletBoxes.bind(this));
     }
 }

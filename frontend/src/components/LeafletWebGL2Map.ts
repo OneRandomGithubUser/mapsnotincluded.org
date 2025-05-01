@@ -16,7 +16,7 @@ interface TileCoords {
 }
 
 class LeafletMapData {
-    private readonly map: L.Map;
+    private map: L.Map;
     private isReadyToRender: boolean;
     private setupPromise: Promise<void> | null;
     constructor(
@@ -28,6 +28,9 @@ class LeafletMapData {
     }
     getMap(): L.Map {
         return this.map;
+    }
+    setMap(map: L.Map): void {
+        this.map = map;
     }
     getIsReadyToRender(): boolean {
         return this.isReadyToRender;
@@ -267,14 +270,29 @@ export class LeafletWebGL2Map {
         mapInstance.invalidateSize();
     }
     public removeMap(htmlId: string): void {
-        if (!this.mapData.has(htmlId)) {
+        const mapData = this.mapData.get(htmlId);
+        if (mapData === undefined) {
             console.error(`Map container with htmlId ${htmlId} not found. Only call removeMap() for cleanup.`);
             throw new Error(`Map container with htmlId ${htmlId} not found. Only call removeMap() for cleanup.`);
         }
-        const mapInstance = this.mapData.get(htmlId)!.getMap();
+        const mapInstance = mapData.getMap();
         mapInstance.off();
-        mapInstance.remove();
+        const deletedMapInstance = mapInstance.remove();
+        mapData.setMap(deletedMapInstance);
         this.mapData.delete(htmlId);
+    }
+    public removeAllMaps(): void {
+        for (const [htmlId, mapData] of this.mapData.entries()) {
+            const mapInstance = mapData.getMap();
+            mapInstance.off();
+            const deletedMapInstance = mapInstance.remove();
+            mapData.setMap(deletedMapInstance);
+            // this.mapData.delete(htmlId); // TODO: fix
+        }
+        for (const [htmlId, mapData] of this.mapData.entries()) {
+            console.log("mapData.getMap()", mapData.getMap());
+            this.mapData.delete(htmlId);
+        }
     }
 
     private async setupLeafletMap(
@@ -351,7 +369,6 @@ export class LeafletWebGL2Map {
     }
 
     public initializeMap(htmlId: string, seed: string): L.Map {
-        seed = Math.random() < 0.5 ? "V-BAD-C-433189014-0-0-0" : "M-BAD-C-147910338-0-0-0" // TODO: remove this hardcoded test seed
         // TODO: activeSeedsRef
         if (this.mapData.has(seed)) {
             return this.mapData.get(seed)!.getMap();
@@ -370,7 +387,12 @@ export class LeafletWebGL2Map {
             }
         });
 
-        const leafletMap = L.map(htmlId, { crs: MapsNotIncludedCRS, minZoom: -5, maxZoom: 20, zoomSnap: 0 }).setView([0, 0], 4);
+        const mapElement = document.getElementById(htmlId);
+        if (!mapElement) {
+            console.error(`Map container with htmlId ${htmlId} not found.`);
+            throw new Error(`Map container with htmlId ${htmlId} not found.`); //
+        }
+        const leafletMap = L.map(mapElement, { crs: MapsNotIncludedCRS, minZoom: -5, maxZoom: 20, zoomSnap: 0 }).setView([0, 0], 4);
 
         const PlaceholderLayer = L.TileLayer.extend({
             getTileUrl(_coords: TileCoords): string {
@@ -555,7 +577,7 @@ export class LeafletWebGL2Map {
             _updateImperial: function (maxMeters: number) {
                 const feet = maxMeters * 3.2808399;
                 const inches = maxMeters * 39.3700787;
-                const mils = inches * 1000;
+                const thou = inches * 1000;
                 let label = '';
                 let ratio = 1;
 
@@ -572,9 +594,9 @@ export class LeafletWebGL2Map {
                     label = inch + ' in';
                     ratio = inch / inches;
                 } else {
-                    let m = this._getRoundNum(mils);
-                    label = m + ' mil';
-                    ratio = m / mils;
+                    let m = this._getRoundNum(thou);
+                    label = m + ' thou'; // "mils" is ambiguous
+                    ratio = m / thou;
                 }
 
                 this._updateScale(this._iScale, label, ratio);
