@@ -351,19 +351,19 @@ export class LeafletWebGL2Map {
             throw this.createError(`Map container with htmlId ${htmlId} not found.`);
         }
 
-        // ✅ Already set up?
+        // Already set up?
         if (leafletMapData.getIsReadyToRender()) {
             return;
         }
 
-        // ✅ Already being set up?
+        // Already being set up?
         const existing = leafletMapData.getSetupPromise();
         if (existing) {
             await existing;
             return;
         }
 
-        // ✅ First caller — begin setup
+        // First caller — begin setup
         const setup = (async () => {
             const base = `/world_data/${seed}`;
             const urls = ["elementIdx8.png", "temperature32.png", "mass32.png"]
@@ -408,10 +408,21 @@ export class LeafletWebGL2Map {
 
             leafletMap.setMaxBounds(bounds);
 
-            // TODO: set view based on map size
+            // Get screen size (in pixels)
+            const mapPixelSize = leafletMap.getSize(); // L.Point with x (width), y (height)
+
+            // Calculate scale factor to fit the world within the screen
+            const scaleX = mapPixelSize.x / numMapUnitsWorldWidth;
+            const scaleY = mapPixelSize.y / numMapUnitsWorldHeight;
+            const scale = Math.min(scaleX, scaleY); // fit both dimensions
+
+            // Convert scale to zoom level
+            const idealZoom = Math.log2(scale); // because each zoom level doubles resolution
+            const boundedZoom = this.get_bounded_zoom(idealZoom);
+
             const worldCenterX = numCellsWorldWidth / 2 / this.ZOOM_0_CELLS_PER_MAP_UNIT;
             const worldCenterY = -numCellsWorldHeight / 2 / this.ZOOM_0_CELLS_PER_MAP_UNIT;
-            leafletMap.setView([worldCenterY, worldCenterX], 4);
+            leafletMap.setView([worldCenterY, worldCenterX], boundedZoom);
 
             leafletMapData.setIsReadyToRender(true);
             leafletMapData.clearSetupPromise();
