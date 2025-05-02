@@ -793,7 +793,7 @@ void main() {
     }
 
     private throwError(msg: string) {
-        const prefixedMsg = `[WebGL2CanvasManager] ${msg}`;
+        const prefixedMsg = `[WebGL2CanvasManager] ❌ ${msg}`;
         throw new Error(prefixedMsg);
     }
 
