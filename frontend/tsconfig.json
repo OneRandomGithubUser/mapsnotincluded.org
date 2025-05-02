@@ -1,6 +1,6 @@
 {
   "compilerOptions": {
-    "target": "es2016",
+    "target": "es2022",
     "module": "ESNext",           // ⬅️ Important for Vite/Vue
     "moduleResolution": "bundler", // Optional, helps Vite/Vue handle modern imports
     "esModuleInterop": true,       // Optional, helps default import interop
