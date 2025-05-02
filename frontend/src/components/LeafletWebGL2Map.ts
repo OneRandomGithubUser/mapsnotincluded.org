@@ -75,12 +75,21 @@ export class LeafletWebGL2Map {
         //
     }
 
+    private createError(msg: string, doConsoleLog: Boolean = false, baseError?: unknown): Error {
+        const prefixedMsg = `[LeafletWebGL2Map] ❌ ${msg}`;
+        const errorOptions = baseError ? {cause: baseError} : undefined;
+        if (doConsoleLog) {
+            console.error(prefixedMsg, baseError);
+        }
+        return new Error(prefixedMsg, errorOptions);
+    }
+
     private initializeWebGL(): Promise<void> {
     if (this.webGLInitPromiseRef.value) {
         return this.webGLInitPromiseRef.value;
     }
 
-    this.webGLInitPromiseRef.value = new Promise(async (resolve) => {
+    this.webGLInitPromiseRef.value = new Promise(async (resolve, reject) => { try {
 
         console.log("Initializing canvas manager");
         const canvasManager = new WebGL2Proxy();
@@ -116,35 +125,35 @@ export class LeafletWebGL2Map {
         // TODO: use an object for this
         const bgImages: {
             urls: string[],
-            images : HTMLImageElement[],
-            bitmaps : ImageBitmap[]
+            images: HTMLImageElement[],
+            bitmaps: ImageBitmap[]
         } = {
-            "urls" : [
+            "urls": [
                 "/space_00.png",
                 "/space_01.png",
             ],
-            "images" : [],
-            "bitmaps" : []
+            "images": [],
+            "bitmaps": []
         }
         const elementDataImage: {
             urls: string[],
-            images : HTMLImageElement[],
-            bitmaps : ImageBitmap[]
+            images: HTMLImageElement[],
+            bitmaps: ImageBitmap[]
         } = {
-            "urls" : [
+            "urls": [
                 "/element_data_1x1.png"
             ],
-            "images" : [],
-            "bitmaps" : []
+            "images": [],
+            "bitmaps": []
         }
         const tileImages: {
             urls: string[],
-            images : HTMLImageElement[],
-            bitmaps : ImageBitmap[]
+            images: HTMLImageElement[],
+            bitmaps: ImageBitmap[]
         } = {
-            "urls" : [],
-            "images" : [],
-            "bitmaps" : []
+            "urls": [],
+            "images": [],
+            "bitmaps": []
         }
 
         for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
@@ -153,8 +162,14 @@ export class LeafletWebGL2Map {
 
         for (const imageData of [bgImages, elementDataImage, tileImages]) {
             // TODO: batch async operations together better without awaiting for each one
-            imageData.images = await loadImagesAsync(imageData.urls);
-            imageData.bitmaps = await Promise.all(imageData.images.map(img => createImageBitmap(img)));
+            const {successes, failures} = await loadImagesAsync(imageData.urls);
+            imageData.images = successes.map(success => success.image);
+            try {
+                imageData.bitmaps = await Promise.all(imageData.images.map(img => createImageBitmap(img)));
+            } catch (err: unknown) {
+                const msg = `Failed to create bitmaps from images for ${imageData.urls} in initializeWebGL()`;
+                throw this.createError(msg, true, err);
+            }
         }
 
         // await canvasManager.setup(imageBitmaps);
@@ -194,7 +209,11 @@ export class LeafletWebGL2Map {
       }
       */
         resolve();
-    });
+    } catch (err: unknown) {
+        const msg = "❌ Failed to initialize WebGL2 canvas manager in initializeWebGL()";
+        console.error(msg, err);
+        reject({reason: msg, error: err});
+    }});
 
     return this.webGLInitPromiseRef.value;
     };
@@ -263,8 +282,8 @@ export class LeafletWebGL2Map {
 
     public resizeMap(htmlId: string): void {
         if (!this.mapData.has(htmlId)) {
-            console.error(`Map container with htmlId ${htmlId} not found.`);
-            throw new Error(`Map container with htmlId ${htmlId} not found.`);
+            const msg = `Map container with htmlId ${htmlId} not found.`;
+            throw this.createError(`Map container with htmlId ${htmlId} not found.`, true);
         }
         const mapInstance = this.mapData.get(htmlId)!.getMap();
         mapInstance.invalidateSize();
@@ -272,8 +291,8 @@ export class LeafletWebGL2Map {
     public removeMap(htmlId: string): void {
         const mapData = this.mapData.get(htmlId);
         if (mapData === undefined) {
-            console.error(`Map container with htmlId ${htmlId} not found. Only call removeMap() for cleanup.`);
-            throw new Error(`Map container with htmlId ${htmlId} not found. Only call removeMap() for cleanup.`);
+            const msg = `Map container with htmlId ${htmlId} not found. Only call removeMap() for cleanup.`;
+            throw this.createError(msg, true);
         }
         const mapInstance = mapData.getMap();
         mapInstance.off();
@@ -302,7 +321,7 @@ export class LeafletWebGL2Map {
     ): Promise<void> {
         const leafletMapData = this.mapData.get(htmlId);
         if (!leafletMapData) {
-            throw new Error(`Map container with htmlId ${htmlId} not found.`);
+            throw this.createError(`Map container with htmlId ${htmlId} not found.`);
         }
 
         // ✅ Already set up?
@@ -322,9 +341,22 @@ export class LeafletWebGL2Map {
             const base = `/world_data/${seed}`;
             const urls = ["elementIdx8.png", "temperature32.png", "mass32.png"]
                 .map(p => `${base}/${p}`);
-            const bitmaps = await Promise.all(urls.map(u => loadAndPad(u, 1200, 500)));
 
-            await this.webGLCanvasRef.value!.sequence().setup({ dataImages: bitmaps, seed }).exec();
+            let bitmaps: ImageBitmap[];
+            try {
+                bitmaps = await Promise.all(urls.map(u => loadAndPad(u, 1200, 500)));
+            } catch (err: unknown) {
+                const msg = `Failed to load/pad images for seed=${seed} in setupLeafletMap()`;
+                throw this.createError(msg, true, err);
+            }
+
+            try {
+                await this.webGLCanvasRef.value!.sequence().setup({ dataImages: bitmaps, seed }).exec();
+            } catch (err: unknown) {
+                const msg = `❌ WebGL setup failed for seed=${seed} in setupLeafletMap()`;
+                throw this.createError(msg, true, err);
+            }
+
 
             const numCellsWorldWidth = bitmaps[0].width;
             const numCellsWorldHeight = bitmaps[0].height;
@@ -362,9 +394,10 @@ export class LeafletWebGL2Map {
 
         try {
             await setup;
-        } catch (err) {
+        } catch (err: unknown) {
+            const msg = `Failed to set up Leaflet map for seed=${seed} in setupLeafletMap()`;
             leafletMapData.clearSetupPromise(); // allow retry
-            throw err;
+            throw this.createError(msg, false, err);
         }
     }
 
@@ -389,8 +422,8 @@ export class LeafletWebGL2Map {
 
         const mapElement = document.getElementById(htmlId);
         if (!mapElement) {
-            console.error(`Map container with htmlId ${htmlId} not found.`);
-            throw new Error(`Map container with htmlId ${htmlId} not found.`); //
+            const msg = `Map container with htmlId ${htmlId} not found.`;
+            throw this.createError(msg, true); //
         }
         const leafletMap = L.map(mapElement, { crs: MapsNotIncludedCRS, minZoom: -5, maxZoom: 20, zoomSnap: 0 }).setView([0, 0], 4);
 
@@ -412,7 +445,7 @@ export class LeafletWebGL2Map {
                 this._mni_leafletWebGL2Map = leafletWebGL2Map;
                 L.setOptions(this, options);
             },
-            createTile: function (coords: TileCoords, done: (error: any | null, tile: HTMLCanvasElement) => void): HTMLDivElement {
+            createTile: function (coords: TileCoords, done: (error: unknown, tile: HTMLCanvasElement) => void): HTMLDivElement {
                 let tileWrapper = document.createElement("div");
                 const tile = document.createElement("canvas");
                 tileWrapper.appendChild(tile);
@@ -431,14 +464,17 @@ export class LeafletWebGL2Map {
                 errorTile.style.display = "none";
                 const errorCtx = errorTile.getContext("2d")!;
 
-                const createErrorTile = (err: any) => {
-                    console.log("Failed to create tile", err, tile);
+                const createAndSendErrorTile = (err: any, tile: HTMLCanvasElement, errorCtx: CanvasRenderingContext2D): HTMLCanvasElement => {
+                    // TODO: is this the best way to log errors in the console?
+                    console.error("Failed to create tile", err, tile);
                     errorCtx.drawImage(tile, 0, 0);
                     LeafletWebGL2Map.drawErrorOverlay(errorCtx, size.x, size.y);
                     tile.style.display = "none";
+                    const errorTile = errorCtx.canvas;
                     errorTile.style.display = "";
                     errorTile.style.visibility = "visible";
                     done(err, errorTile);
+                    return errorTile;
                 }
 
                 try {
@@ -447,13 +483,13 @@ export class LeafletWebGL2Map {
                     const seed = this._mni_seed;
                     // TODO: tile layer that says Error on it
                     if (seed === null) {
-                        console.error("Seed is null");
-                        done(new Error("Seed is null"), tile);
+                        const msg = "Seed is null";
+                        done(this._mni_leafletWebGL2Map.createError(msg, true), tile);
                         return tileWrapper;
                     }
                     if (typeof seed !== "string") {
-                        console.error("Seed is not a string");
-                        done(new Error("Seed is not a string"), tile);
+                        const msg = "Seed is not a string";
+                        done(this._mni_leafletWebGL2Map.createError(msg, true), tile);
                         return tileWrapper;
                     }
 
@@ -463,9 +499,8 @@ export class LeafletWebGL2Map {
                         const numCellsWorldWidth = this._mni_leafletWebGL2Map.numCellsWorldWidthRef.value;
                         const numCellsWorldHeight = this._mni_leafletWebGL2Map.numCellsWorldHeightRef.value;
                         if (numCellsWorldWidth === null || numCellsWorldHeight === null) {
-                            console.error("numCellsWorldWidth or numCellsWorldHeight is null");
-                            createErrorTile(new Error("numCellsWorldWidth or numCellsWorldHeight is null"));
-                            return tileWrapper;
+                            const msg = `numCellsWorldWidth or numCellsWorldHeight is null for seed=${seed} in createTile()`;
+                            return createAndSendErrorTile(this._mni_leafletWebGL2Map.createError(msg), tile, errorCtx);
                         }
 
                         const canvasSize = this._mni_leafletWebGL2Map.get_map_units_per_cell_from_zoom(coords.z);
@@ -473,16 +508,23 @@ export class LeafletWebGL2Map {
                         const xOffset = -1 * coords.x * xyScale;
                         const yOffset = (coords.y + 1) * xyScale - (numCellsWorldHeight ?? 0);
 
-                        const [_, bitmap] = await this._mni_leafletWebGL2Map.webGLCanvasRef.value!.sequence()
-                            .render(
-                                seed,
-                                this._mni_leafletWebGL2Map.numCellsWorldWidthRef.value!,
-                                this._mni_leafletWebGL2Map.numCellsWorldHeightRef.value!,
-                                xyScale, xyScale,
-                                xOffset, yOffset,
-                                size.x, size.y
-                            ).transferImageBitmap()
-                            .exec();
+                        let bitmap: ImageBitmap;
+                        try {
+                            const [_, bmp] = await this._mni_leafletWebGL2Map.webGLCanvasRef.value!.sequence()
+                                .render(
+                                    seed,
+                                    this._mni_leafletWebGL2Map.numCellsWorldWidthRef.value!,
+                                    this._mni_leafletWebGL2Map.numCellsWorldHeightRef.value!,
+                                    xyScale, xyScale,
+                                    xOffset, yOffset,
+                                    size.x, size.y
+                                ).transferImageBitmap()
+                                .exec();
+                            bitmap = bmp;
+                        } catch (err: unknown) {
+                            const msg = `WebGL setup failed for seed=${seed} in createTile()`;
+                            return createAndSendErrorTile(this._mni_leafletWebGL2Map.createError(msg, false, err), tile, errorCtx);
+                        }
 
                         try {
 
@@ -507,14 +549,17 @@ export class LeafletWebGL2Map {
                             }
 
                             done(null, tile);
-                        } catch (err) {
-                            console.error("Failed to get canvas image bitmap", err);
-                            createErrorTile(err);
-                            done(err as Error, tile);
+                        } catch (err: unknown) {
+                            const msg = `Failed to get canvas image bitmap for seed=${seed} in createTile()`;
+                            createAndSendErrorTile(this._mni_leafletWebGL2Map.createError(msg, false, err), tile, errorCtx);
                         }
-                    }));
-                } catch (err) {
-                    createErrorTile(err);
+                    })).catch((err: unknown) => {
+                        const msg = `Failed to initialize WebGL for seed=${seed} in createTile()`;
+                        createAndSendErrorTile(this._mni_leafletWebGL2Map.createError(msg, false, err), tile, errorCtx);
+                    });
+                } catch (err: unknown) {
+                    const msg = `Failed to create tile for seed=${seed} in createTile()`;
+                    createAndSendErrorTile(this._mni_leafletWebGL2Map.createError(msg, false, err), tile, errorCtx);
                 }
 
                 return tileWrapper;
