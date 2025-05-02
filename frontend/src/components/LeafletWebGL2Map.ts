@@ -218,50 +218,77 @@ export class LeafletWebGL2Map {
     return this.webGLInitPromiseRef.value;
     };
 
-    private static drawErrorOverlay = (ctx: CanvasRenderingContext2D, width: number, height: number): void => {
-        ctx.strokeStyle = "red";
-        ctx.lineWidth = 4;
+    /**
+     * Draws a labeled overlay on the canvas with optional border and multiple lines of styled text.
+     */
+    private static drawTextOverlay = (
+        ctx: CanvasRenderingContext2D,
+        width: number,
+        height: number,
+        lines: string[],
+        options?: {
+            strokeColor?: string;
+            fillColor?: string;
+            backgroundColor?: string;
+            borderColor?: string;
+            borderWidth?: number;
+            font?: string;
+            lineHeight?: number;
+        }
+    ): void => {
+        const {
+            strokeColor = "white",
+            fillColor = "red",
+            backgroundColor = null,
+            borderColor = "red",
+            borderWidth = 4,
+            font = "bold 16px Arial",
+            lineHeight = 24
+        } = options || {};
+
+        // Optional background fill
+        if (backgroundColor) {
+            ctx.fillStyle = backgroundColor;
+            ctx.fillRect(0, 0, width, height);
+        }
+
+        // Border
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = borderWidth;
         ctx.strokeRect(0, 0, width, height);
-        ctx.font = "bold 16px Arial";
+
+        // Text setup
+        ctx.font = font;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        ctx.strokeStyle = "white";
-        ctx.strokeText("ERROR", width / 2, height / 2 - 10);
-        ctx.fillStyle = "red";
-        ctx.fillText("ERROR", width / 2, height / 2 - 10)
+        const centerX = width / 2;
+        const startY = height / 2 - ((lines.length - 1) * lineHeight) / 2;
 
-        ctx.strokeStyle = "white";
-        ctx.strokeText("loading tile", width / 2, height / 2 + 10);
-        ctx.fillStyle = "red";
-        ctx.fillText("loading tile", width / 2, height / 2 + 10);
+        for (let i = 0; i < lines.length; i++) {
+            const y = startY + i * lineHeight;
+
+            ctx.strokeStyle = strokeColor;
+            ctx.strokeText(lines[i], centerX, y);
+
+            ctx.fillStyle = fillColor;
+            ctx.fillText(lines[i], centerX, y);
+        }
+    };
+
+
+    private static drawErrorOverlay = (ctx: CanvasRenderingContext2D, width: number, height: number): void => {
+        LeafletWebGL2Map.drawTextOverlay(ctx, width, height, [
+            "ERROR",
+            "in loading tile"
+        ]);
     }
 
     private static drawDebugInfo = (ctx: CanvasRenderingContext2D, coords: TileCoords, width: number, height: number): void => {
-        ctx.strokeStyle = "white";
-        ctx.lineWidth = 6;
-        ctx.strokeRect(0, 0, width, height);
-
-        ctx.strokeStyle = "red";
-        ctx.lineWidth = 4;
-        ctx.strokeRect(0, 0, width, height);
-
-        ctx.font = "bold 16px Arial";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = "white";
-        ctx.strokeText(`(${coords.x}, ${coords.y}, ${coords.z})`, width / 2, height / 2 - 10);
-
-        ctx.fillStyle = "red";
-        ctx.fillText(`(${coords.x}, ${coords.y}, ${coords.z})`, width / 2, height / 2 - 10);
-
-        ctx.strokeStyle = "white";
-        ctx.strokeText(`${width} × ${height} px`, width / 2, height / 2 + 10);
-
-        ctx.fillStyle = "red";
-        ctx.fillText(`${width} × ${height} px`, width / 2, height / 2 + 10);
+        LeafletWebGL2Map.drawTextOverlay(ctx, width, height, [
+            `(${coords.x}, ${coords.y}, ${coords.z})`,
+            `${width} × ${height} px`
+        ]);
     };
 
     private get_map_units_per_cell_from_zoom(zoom: number): number {
