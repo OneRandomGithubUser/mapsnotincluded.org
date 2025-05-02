@@ -210,7 +210,7 @@ export class LeafletWebGL2Map {
       */
         resolve();
     } catch (err: unknown) {
-        const msg = "❌ Failed to initialize WebGL2 canvas manager in initializeWebGL()";
+        const msg = "Failed to initialize WebGL2 canvas manager in initializeWebGL()";
         console.error(msg, err);
         reject({reason: msg, error: err});
     }});
@@ -353,7 +353,7 @@ export class LeafletWebGL2Map {
             try {
                 await this.webGLCanvasRef.value!.sequence().setup({ dataImages: bitmaps, seed }).exec();
             } catch (err: unknown) {
-                const msg = `❌ WebGL setup failed for seed=${seed} in setupLeafletMap()`;
+                const msg = `WebGL setup failed for seed=${seed} in setupLeafletMap()`;
                 throw this.createError(msg, true, err);
             }
 
