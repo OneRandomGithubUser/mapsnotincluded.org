@@ -71,7 +71,7 @@ export class LeafletMessageBrowserIframe {
             // TODO: remove this debug code
             const debugPredefinedSeeds = [
                 "V-BAD-C-433189014-0-0-0",
-                "invalid-seed",
+                "invalid-seed-test",
                 "M-BAD-C-147910338-0-0-0"
             ]
             const mapContainers: LeafletBoxBounds[] = boxes["map-containers"].map((box: LeafletBoxBounds) => ({
