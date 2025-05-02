@@ -4,8 +4,9 @@ const loadImagePromise = (url: string): Promise<HTMLImageElement> => {
         const image = new Image();
         image.onload = () => resolve(image);
         image.onerror = (err) => {
-            console.error(`❌ Failed to load image: ${url}`, err);
-            reject({ url, err });
+            const msg = `❌ Failed to load image: ${url}`;
+            console.error(msg, err);
+            reject(new Error(msg, {cause: err}));
         };
         image.src = url;
     });
@@ -41,10 +42,34 @@ const loadImagesSync = (
     });
 };
 
+// TODO: Add error handling for failed image loads, and multi loadAndPad calls
 // Modern async version
-const loadImagesAsync = async (urls: string[]): Promise<HTMLImageElement[]> => {
-    const imagePromises = urls.map(loadImagePromise);
-    return Promise.all(imagePromises);
+const loadImagesAsync = async (urls: string[]): Promise<{
+    successes: { url: string, image: HTMLImageElement }[],
+    failures: { url: string, error: any }[]
+}> => {
+    const results = await Promise.allSettled(
+        urls.map(url =>
+            loadImagePromise(url)
+                .then(image => ({ url, image }))
+                .catch(error => {
+                    throw new Error(url, { cause: error });
+                })
+        )
+    );
+
+    const successes: { url: string, image: HTMLImageElement }[] = [];
+    const failures: { url: string, error: any }[] = [];
+
+    for (const result of results) {
+        if (result.status === "fulfilled") {
+            successes.push(result.value);
+        } else {
+            failures.push(result.reason);
+        }
+    }
+
+    return { successes, failures };
 };
 
 export async function loadAndPad(
@@ -52,15 +77,30 @@ export async function loadAndPad(
     w: number,
     h: number
 ): Promise<ImageBitmap> {
-    const img   = await loadImagePromise(url);
-    const cvs   = new OffscreenCanvas(w, h);
-    const ctx   = cvs.getContext("2d")!;
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0,0,w,h);
-    const x = (w - img.width )>>1;
-    const y = (h - img.height)>>1;
-    ctx.drawImage(img, x, y);
-    return cvs.transferToImageBitmap();
+    try {
+        const img = await loadImagePromise(url);
+        const cvs = new OffscreenCanvas(w, h);
+        const ctx = cvs.getContext("2d");
+
+        if (!ctx) {
+            throw new Error("Failed to get 2D context");
+        }
+
+        // Fill with opaque white
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, w, h);
+
+        // Center the image
+        const x = Math.floor((w - img.width) / 2);
+        const y = Math.floor((h - img.height) / 2);
+        ctx.drawImage(img, x, y);
+
+        return cvs.transferToImageBitmap();
+    } catch (err: unknown) {
+        const msg = `❌ Failed to load and pad image: ${url}`
+        // console.error(msg, err);
+        throw new Error( msg, { cause: err });
+    }
 }
 
 export { loadImagePromise as loadImage, loadImagesSync, loadImagesAsync };
