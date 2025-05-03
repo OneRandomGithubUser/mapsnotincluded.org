@@ -620,20 +620,104 @@ export class LeafletWebGL2Map {
 
         (L.gridLayer as any).myCanvasLayer = (layerIndex: WorldLayer, opts?: L.GridLayerOptions) => new MyCanvasLayer(seed, this, layerIndex, opts);
         const elementLayer = (L.gridLayer as any).myCanvasLayer(0); // ElementIdx
-        const temperatureLayer = (L.gridLayer as any).myCanvasLayer(1); // Temperature
-        const massLayer = (L.gridLayer as any).myCanvasLayer(2); // Mass
+        const temperatureLayer = (L.gridLayer as any).myCanvasLayer(1, {
+            opacity: 0.8
+        }); // Temperature
+        const massLayer = (L.gridLayer as any).myCanvasLayer(2, {
+            opacity: 0.8
+        }); // Mass
 
         const baseLayers: Record<string, L.Layer> = {
-            "Element": elementLayer,
+            "Element": elementLayer
+        };
+
+        const overlayLayers: Record<string, L.Layer> = {
             "Temperature": temperatureLayer,
-            "Mass": massLayer,
+            "Mass": massLayer
         };
 
         // Set initial layer
         elementLayer.addTo(leafletMap);
 
-        // Add the layer switcher control
-        L.control.layers(baseLayers, undefined, { collapsed: false }).addTo(leafletMap);
+        // Add the layer switcher control\
+        // TODO: maybe switch this to a Vue component?
+        const LayerToggleControl = L.Control.extend({
+            options: {
+                position: 'topright'
+            },
+
+            onAdd: function (map: L.Map) {
+                const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
+                container.style.background = 'white';
+                container.style.padding = '6px 8px';
+                container.style.display = 'flex';
+                container.style.flexDirection = 'column';
+                container.style.gap = '6px';
+
+                L.DomEvent.disableClickPropagation(container);
+
+                const layers: Record<string, { layer: L.Layer; icon: string; label: string }> = {
+                    "_mni_temperature_layer": {
+                        layer: temperatureLayer,
+                        icon: "🌡️",
+                        label: "Temperature"
+                    },
+                    "_mni_mass_layer": {
+                        layer: massLayer,
+                        icon: "🧱",
+                        label: "Mass"
+                    }
+                };
+
+                let currentLayer: L.Layer | null = null;
+
+                Object.entries(layers).forEach(([name, { layer, icon, label }]) => {
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.innerHTML = `${icon} ${label}`;
+                    button.style.padding = "6px 12px";
+                    button.style.font = "14px sans-serif";
+                    button.style.cursor = "pointer";
+                    button.style.border = "1px solid #ccc";
+                    button.style.borderRadius = "4px";
+                    button.style.background = "#f4f4f4";
+
+                    const toggleActiveStyle = (active: boolean) => {
+                        button.style.background = active ? "#0078ff" : "#f4f4f4";
+                        button.style.color = active ? "#fff" : "#000";
+                    };
+
+                    toggleActiveStyle(false);
+
+                    button.addEventListener("click", () => {
+                        const isAlreadyActive = currentLayer === layer;
+                        if (isAlreadyActive) {
+                            map.removeLayer(layer);
+                            currentLayer = null;
+                            toggleActiveStyle(false);
+                        } else {
+                            if (currentLayer) {
+                                map.removeLayer(currentLayer);
+                                // Reset all button styles
+                                [...container.querySelectorAll("button")].forEach(b => {
+                                    (b as HTMLButtonElement).style.background = "#f4f4f4";
+                                    (b as HTMLButtonElement).style.color = "#000";
+                                });
+                            }
+                            map.addLayer(layer);
+                            currentLayer = layer;
+                            toggleActiveStyle(true);
+                        }
+                    });
+
+                    container.appendChild(button);
+                });
+
+                return container;
+            }
+        });
+
+        leafletMap.addControl(new LayerToggleControl());
 
         // Add a scale control
         L.control.scale().addTo(leafletMap);
