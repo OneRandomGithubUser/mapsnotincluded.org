@@ -823,28 +823,40 @@ vec2 pairwise_mult(vec2 vector_1, vec2 vector_2) {
     return vec2(vector_1.x * vector_2.x, vector_1.y * vector_2.y);
 }
 
+// Magenta/black checkerboard fallback for invalid data
+vec4 get_error_texture_color(ivec2 cell_pos) {
+    const int TILE_SIZE = 8;
+    bool isEven = ((cell_pos.x / TILE_SIZE + cell_pos.y / TILE_SIZE) % 2) == 0;
+
+    vec3 magenta = vec3(1.0, 0.0, 1.0);
+    vec3 black = vec3(0.0, 0.0, 0.0);
+    vec3 color = isEven ? magenta : black;
+
+    return vec4(color, 1.0);
+}
+
 void main() {
-    if (u_rendering_background) {
-        vec4 space_background = texture(u_space_image_array, vec3(v_texCoord, 0));
-        vec4 space_foreground = texture(u_space_image_array, vec3(v_texCoord, 1));
-        outColor = space_background + space_foreground;
-    } else {
-        // TODO: half-pixel correction
-        // vec4 downPixelColor = texture_displacement_in_pixels(_____, v_texCoord, vec2pixels(vec2(0, -1)));
-    
-        // Get the world texture size dynamically
-        ivec2 paddedWorldSize = textureSize(u_world_data_image_array, 0).xy; // Get world texture resolution
-        // e.g. (1200, 500)
-        // world size is different, e.g. (636, 404)
+    // TODO: half-pixel correction
+    // vec4 downPixelColor = texture_displacement_in_pixels(_____, v_texCoord, vec2pixels(vec2(0, -1)));
+
+    // Get the world texture size dynamically
+    ivec2 paddedWorldSize = textureSize(u_world_data_image_array, 0).xy; // Get world texture resolution
+    // e.g. (1200, 500)
+    // world size is different, e.g. (636, 404)
+        
+    // Compute cell-relative texture coordinates
+    vec2 v_worldCellPositionFloat = v_texCoord * vec2(paddedWorldSize);   
+    // e.g. if v_texCoord = (0.123, 0.456) and paddedWorldSize = (636, 404) then v_worldCellPositionFloat = (78.228, 184.224)
+   
+    switch (u_worldLayer) {
+        case 0: {
+            // default: tile with texture/overlay
             
-        // Compute cell-relative texture coordinates
-        vec2 v_worldCellPositionFloat = v_texCoord * vec2(paddedWorldSize);   
-        // e.g. if v_texCoord = (0.123, 0.456) and paddedWorldSize = (636, 404) then v_worldCellPositionFloat = (78.228, 184.224)
-       
-        switch (u_worldLayer) {
-            case 0: {
-                // default: tile with texture/overlay
-                
+            if (u_rendering_background) {
+                vec4 space_background = texture(u_space_image_array, vec3(v_texCoord, 0));
+                vec4 space_foreground = texture(u_space_image_array, vec3(v_texCoord, 1));
+                outColor = space_background + space_foreground;
+            } else {
                 // Look up a color from the texture.
                 vec4 elementIdxColorData = texture(u_world_data_image_array,
                                  vec3(v_texCoord, float(u_worldSlot*3))); // Layer 0 = elementIdx8
@@ -881,50 +893,68 @@ void main() {
                 vec4 space_texture = space_background + space_foreground;
             
                 outColor = mix(space_texture, foreground, foreground.a);
-                break;
             }
-            case 1: {
-                // temperature 
-                
+            break;
+        }
+        case 1: {
+            // temperature 
+            float temperature = -1.0; // default value that should never be used
+            
+            if (u_rendering_background) {
+                // Assume the background is vacuum
+                temperature = 0.0;
+            } else {
+            
                 // Look up a color from the texture.
                 vec4 tempColorData = texture(u_world_data_image_array,
                                  vec3(v_texCoord, float(u_worldSlot*3+1))); // Layer 1 = temperature32
                                  
                 // Decode the 32-bit RGBA value to a 32-bit float
-                float temperature = tempColorData == vec4(1.0, 1.0, 1.0, 1.0) ? 0.0 : decodeRGBAtoFloat(tempColorData);
-                
-                outColor = temperatureFloatToRGBA(temperature);
-                
-                break;
+                temperature = tempColorData == vec4(1.0, 1.0, 1.0, 1.0) ? 0.0 : decodeRGBAtoFloat(tempColorData);
             }
-            case 2: {
-                // mass layer
-                
+            
+            if (temperature < 0.0 || temperature > 10000.0) {
+                // temperature is out of bounds, so use the error texture
+                ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                outColor = get_error_texture_color(cell_pos);
+            } else {
+                outColor = temperatureFloatToRGBA(temperature);
+            }
+            
+            break;
+        }
+        case 2: {
+            // mass layer
+            float mass = -1.0; // default value that should never be used
+            
+            if (u_rendering_background) {
+                // Assume the background is vacuum
+                mass = 0.0;
+            } else {
                 // Look up a color from the texture.
                 vec4 massColorData = texture(u_world_data_image_array,
                                  vec3(v_texCoord, float(u_worldSlot*3+2))); // Layer 2 = mass32
                 
                 // Decode the 32-bit RGBA value to a 32-bit float
-                float mass = massColorData == vec4(1.0, 1.0, 1.0, 1.0) ? 0.0 : decodeRGBAtoFloat(massColorData);
-                
+                mass = massColorData == vec4(1.0, 1.0, 1.0, 1.0) ? 0.0 : decodeRGBAtoFloat(massColorData);
+            }
+            
+            if (mass < 0.0) {
+                // mass is out of bounds, so use the error texture
+                ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                outColor = get_error_texture_color(cell_pos);
+            } else {
                 outColor = massFloatToRGBA(mass);
-                
-                break;
             }
-            default: {
-                // Magenta/black checkerboard fallback for unknown layers
-                int tileSize = 8;
-                ivec2 cellPos = ivec2(floor(v_worldCellPositionFloat));
-                bool isEven = ((cellPos.x / tileSize + cellPos.y / tileSize) % 2) == 0;
-        
-                vec3 magenta = vec3(1.0, 0.0, 1.0);
-                vec3 black = vec3(0.0, 0.0, 0.0);
-                vec3 color = isEven ? magenta : black;
-        
-                outColor = vec4(color, 1.0);
-                
-                break;
-            }
+            
+            break;
+        }
+        default: {
+            ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+    
+            outColor = get_error_texture_color(cell_pos);
+            
+            break;
         }
     }
     
