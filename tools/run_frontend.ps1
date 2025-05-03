@@ -1,7 +1,7 @@
 # Install npm, or update it if it's already installed
 winget install -e --id OpenJS.NodeJS
 
-# Reload the Powershell window to allow npm to run
+# Reload the Powershell environment variables to allow npm to run
 $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
 
 # Allow Powershell to run npm
