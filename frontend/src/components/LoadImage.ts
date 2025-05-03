@@ -86,9 +86,8 @@ export async function loadAndPad(
             throw new Error("Failed to get 2D context");
         }
 
-        // Fill with opaque white
-        ctx.fillStyle = "#FFFFFF";
-        ctx.fillRect(0, 0, w, h);
+        // Clears to transparent black
+        ctx.clearRect(0, 0, w, h);
 
         // Center the image
         const x = Math.floor((w - img.width) / 2);

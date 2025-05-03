@@ -1,4 +1,4 @@
-import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";
+import WebGL2Proxy, {WorldLayer} from "@/components/WebGL2WebWorkerProxy";
 import {loadAndPad, loadImagesAsync} from "@/components/LoadImage";
 import {bitmapToBase64, canvasToBase64, imageToBase64} from "@/components/MediaToBase64";
 
@@ -371,7 +371,19 @@ export class LeafletWebGL2Map {
 
             let bitmaps: ImageBitmap[];
             try {
-                bitmaps = await Promise.all(urls.map(u => loadAndPad(u, 1200, 500)));
+                // TODO: move this to LoadImage.ts
+                const {successes, failures} = await loadImagesAsync(urls);
+                const images = successes.map(success => success.image);
+                try {
+                    bitmaps = await Promise.all(images.map(img => createImageBitmap(img, {
+                        premultiplyAlpha: "none",
+                        colorSpaceConversion: "none"
+                    })));
+                } catch (err: unknown) {
+                    const msg = `Failed to create bitmaps from images for ${urls} in initializeWebGL()`;
+                    throw this.createError(msg, true, err);
+                }
+                //bitmaps = await Promise.all(urls.map(u => loadAndPad(u, 1200, 500)));
             } catch (err: unknown) {
                 const msg = `Failed to load/pad images for seed=${seed} in setupLeafletMap()`;
                 throw this.createError(msg, true, err);
@@ -478,9 +490,10 @@ export class LeafletWebGL2Map {
         (L.tileLayer as any).placeholderLayer().addTo(leafletMap);
 
         const MyCanvasLayer = L.GridLayer.extend({
-            initialize: function(seed: string, leafletWebGL2Map: LeafletWebGL2Map, options: L.GridLayerOptions) {
+            initialize: function(seed: string, leafletWebGL2Map: LeafletWebGL2Map, layerIndex: WorldLayer, options: L.GridLayerOptions) {
                 this._mni_seed = seed;
                 this._mni_leafletWebGL2Map = leafletWebGL2Map;
+                this._mni_layerIndex = layerIndex;
                 L.setOptions(this, options);
             },
             createTile: function (coords: TileCoords, done: (error: unknown, tile: HTMLCanvasElement) => void): HTMLDivElement {
@@ -555,7 +568,8 @@ export class LeafletWebGL2Map {
                                     this._mni_leafletWebGL2Map.numCellsWorldHeightRef.value!,
                                     xyScale, xyScale,
                                     xOffset, yOffset,
-                                    size.x, size.y
+                                    size.x, size.y,
+                                    this._mni_layerIndex
                                 ).transferImageBitmap()
                                 .exec();
                             bitmap = bmp;
@@ -608,8 +622,10 @@ export class LeafletWebGL2Map {
         });
 
 
-        (L.gridLayer as any).myCanvasLayer = (opts?: L.GridLayerOptions) => new MyCanvasLayer(seed, this, opts);
-        (L.gridLayer as any).myCanvasLayer().addTo(leafletMap);
+        (L.gridLayer as any).myCanvasLayer = (layerIndex: WorldLayer, opts?: L.GridLayerOptions) => new MyCanvasLayer(seed, this, layerIndex, opts);
+        //(L.gridLayer as any).myCanvasLayer(0).addTo(leafletMap); // ElementIdx
+        //(L.gridLayer as any).myCanvasLayer(1).addTo(leafletMap); // Temperature
+        (L.gridLayer as any).myCanvasLayer(2).addTo(leafletMap); // Mass
 
         L.control.scale().addTo(leafletMap);
 
