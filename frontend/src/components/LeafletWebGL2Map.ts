@@ -8,6 +8,7 @@ import { useRoute } from "vue-router";
 
 import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
+import {createError} from "@/components/CreateCascadingError";
 
 interface TileCoords {
     x: number;
@@ -76,12 +77,7 @@ export class LeafletWebGL2Map {
     }
 
     private createError(msg: string, doConsoleLog: Boolean = false, baseError?: unknown): Error {
-        const prefixedMsg = `[LeafletWebGL2Map] ❌ ${msg}`;
-        const errorOptions = baseError ? {cause: baseError} : undefined;
-        if (doConsoleLog) {
-            console.error(prefixedMsg, baseError);
-        }
-        return new Error(prefixedMsg, errorOptions);
+        return createError("LeafletWebGL2Map", msg, doConsoleLog, baseError);
     }
 
     private initializeWebGL(): Promise<void> {

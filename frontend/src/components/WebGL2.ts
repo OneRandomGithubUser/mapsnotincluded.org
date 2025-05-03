@@ -1,8 +1,8 @@
 // Confused? See https://webgl2fundamentals.org/webgl/lessons/webgl-fundamentals.html.
 
-import {i} from "vite/dist/node/types.d-aGj9QkWt";
 import {WorldLayer} from "@/components/MapData";
 import {bitmapToBase64} from "@/components/MediaToBase64";
+import {createError} from "@/components/CreateCascadingError";
 
 function getCanvasImageSourceDims(
     source: TexImageSource
@@ -321,7 +321,7 @@ export default class WebGL2CanvasManager {
         this.canvas = new OffscreenCanvas(defaultWidth, defaultHeight);
         const ctx = this.canvas.getContext("webgl2");
         if (!ctx) {
-            this.throwError("WebGL2 is not supported.");
+            throw this.createError("WebGL2 is not supported.");
         }
         this.gl = ctx;
         const gl = this.gl;
@@ -365,7 +365,7 @@ export default class WebGL2CanvasManager {
         }
         const clearFrameBuffer = gl.createFramebuffer();
         if (clearFrameBuffer === null) {
-            this.throwError("Failed to create clearFrameBuffer.");
+            throw this.createError("Failed to create clearFrameBuffer.");
         }
         this.clearFrameBuffer = clearFrameBuffer;
     }
@@ -389,16 +389,16 @@ export default class WebGL2CanvasManager {
         if (opts) {
             if (opts.dataImages) {
                 if (opts.seed === undefined) {
-                    this.throwError("Seed is required for data images.");
+                    throw this.createError("Seed is required for data images.");
                 }
                 const worldDataImages = opts.dataImages;
                 if (worldDataImages.length !== this.DATA_IMAGES_PER_SEED) {
-                    this.throwError(`Expected ${this.DATA_IMAGES_PER_SEED} data images, but got ${worldDataImages.length}.`);
+                    throw this.createError(`Expected ${this.DATA_IMAGES_PER_SEED} data images, but got ${worldDataImages.length}.`);
                 }
                 const worldDataImagesWrapper = new TextureArray(worldDataImages);
                 const {textures: worldDataTextures, framebuffers} = this.setupTextures(worldDataImages);
                 const dummyGetAtlasBoundsForLayer = (layerIndex: number, mipmapIndex: number) => {
-                    this.throwError("Called dummy atlas bounds.");
+                    throw this.createError("Called dummy atlas bounds.");
                     return {x: 0, y: 0, width: 0, height: 0};
                 };
                 const seed = opts.seed;
@@ -497,7 +497,7 @@ export default class WebGL2CanvasManager {
         // Set the currently rendering seed
         const slot = [...this.textureLRU.keys()].indexOf(seed);
         if (slot < 0) {
-            this.throwError(`Seed not loaded: ${seed}`);
+            throw this.createError(`Seed not loaded: ${seed}`);
         }
         this.bind1UniformIntsToUnit(slot, "u_worldSlot");
 
@@ -514,7 +514,7 @@ export default class WebGL2CanvasManager {
                 layer = 2;
                 break;
             default:
-                this.throwError(`Invalid world layer: ${worldLayer}`);
+                throw this.createError(`Invalid world layer: ${worldLayer}`);
         }
         this.bind1UniformIntsToUnit(layer!, "u_worldLayer");
 
@@ -963,32 +963,24 @@ void main() {
                 // No error, do nothing
                 break;
             case gl.INVALID_ENUM:
-                this.throwError(`${errorMsgPrefix} INVALID_ENUM`);
-                break;
+                throw this.createError(`${errorMsgPrefix} INVALID_ENUM`);
             case gl.INVALID_VALUE:
-                this.throwError(`${errorMsgPrefix} INVALID_VALUE`);
-                break;
+                throw this.createError(`${errorMsgPrefix} INVALID_VALUE`);
             case gl.INVALID_OPERATION:
-                this.throwError(`${errorMsgPrefix} INVALID_OPERATION`);
-                break;
+                throw this.createError(`${errorMsgPrefix} INVALID_OPERATION`);
             case gl.INVALID_FRAMEBUFFER_OPERATION:
-                this.throwError(`${errorMsgPrefix} INVALID_FRAMEBUFFER_OPERATION`);
-                break;
+                throw this.createError(`${errorMsgPrefix} INVALID_FRAMEBUFFER_OPERATION`);
             case gl.OUT_OF_MEMORY:
-                this.throwError(`${errorMsgPrefix} OUT_OF_MEMORY`);
-                break;
+                throw this.createError(`${errorMsgPrefix} OUT_OF_MEMORY`);
             case gl.CONTEXT_LOST_WEBGL:
-                this.throwError(`${errorMsgPrefix} CONTEXT_LOST_WEBGL`);
-                break;
+                throw this.createError(`${errorMsgPrefix} CONTEXT_LOST_WEBGL`);
             default:
-                this.throwError(`${errorMsgPrefix} Unknown error`);
-                break;
+                throw this.createError(`${errorMsgPrefix} Unknown error`);
         }
     }
 
-    private throwError(msg: string) {
-        const prefixedMsg = `[WebGL2CanvasManager] ❌ ${msg}`;
-        throw new Error(prefixedMsg);
+    private createError(msg: string, doConsoleLog: Boolean = false, baseError?: unknown): Error {
+        return createError("WebGL2CanvasManager", msg, doConsoleLog, baseError);
     }
 
     private acquireTextureSlot(seed:string): number {
@@ -1022,19 +1014,19 @@ void main() {
         const vertexShader = this.createShader(gl.VERTEX_SHADER, vertexShaderSource);
 
         if (vertexShader === undefined || vertexShader === null) {
-            this.throwError("Failed to compile vertex shader.");
+            throw this.createError("Failed to compile vertex shader.");
         }
 
         const fragmentShader = this.createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
         if (fragmentShader === undefined || fragmentShader === null) {
-            this.throwError("Failed to compile fragment shader.");
+            throw this.createError("Failed to compile fragment shader.");
         }
 
         // Link program
         const program = this.createProgram(vertexShader, fragmentShader);
 
         if (program === undefined || program === null) {
-            this.throwError("WebGL2CanvasManager: Failed to link shaders.");
+            throw this.createError("WebGL2CanvasManager: Failed to link shaders.");
         }
 
         return { program, vertexShader, fragmentShader };
@@ -1046,11 +1038,11 @@ void main() {
 
         const framebuffer = gl.createFramebuffer();
         if (framebuffer === undefined || framebuffer === null) {
-            this.throwError("Failed to create background framebuffer.");
+            throw this.createError("Failed to create background framebuffer.");
         }
         const texture = gl.createTexture();
         if (texture === undefined || texture === null) {
-            this.throwError("Failed to create background texture.");
+            throw this.createError("Failed to create background texture.");
         }
 
         // Bind and configure the background texture
@@ -1090,7 +1082,7 @@ void main() {
         const positionBuffer = gl.createBuffer();
 
         if (positionBuffer === null) {
-            this.throwError("Failed to create position buffer.");
+            throw this.createError("Failed to create position buffer.");
         }
 
         // Bind it to ARRAY_BUFFER (think of it as ARRAY_BUFFER = positionBuffer)
@@ -1115,7 +1107,7 @@ void main() {
         const vao = gl.createVertexArray();
 
         if (vao === null) {
-            this.throwError("Failed to create vertex array object.");
+            throw this.createError("Failed to create vertex array object.");
         }
 
         // and make it the one we're currently working with
@@ -1180,7 +1172,7 @@ void main() {
         const texCoordBuffer = gl.createBuffer();
 
         if (texCoordBuffer === null) {
-            this.throwError("Failed to create texture coordinate buffer.");
+            throw this.createError("Failed to create texture coordinate buffer.");
         }
 
         gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
@@ -1230,7 +1222,7 @@ void main() {
         const texture = gl.createTexture();
 
         if (texture === null) {
-            this.throwError("Failed to create texture.");
+            throw this.createError("Failed to create texture.");
         }
 
         gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -1279,7 +1271,7 @@ void main() {
             const fbo = gl.createFramebuffer();
 
             if (fbo === null) {
-                this.throwError("Failed to create framebuffer.");
+                throw this.createError("Failed to create framebuffer.");
             }
 
             framebuffers.push(fbo);
@@ -1303,7 +1295,7 @@ void main() {
 
         if (u_image_location === null) {
             const msg = `Failed to get image location: ${glsl_location} (location is invalid or unused)`;
-            this.throwError(msg);
+            throw this.createError(msg);
         }
 
         // set which texture units to render with.
@@ -1320,7 +1312,7 @@ void main() {
         const texture = gl.createTexture();
 
         if (texture === null) {
-            this.throwError("Failed to create texture array.");
+            throw this.createError("Failed to create texture array.");
         }
 
         gl.bindTexture(gl.TEXTURE_2D_ARRAY, texture);
@@ -1339,7 +1331,7 @@ void main() {
             gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
             gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         } else {
-            this.throwError("usePixelArtSettings must be a boolean.");
+            throw this.createError("usePixelArtSettings must be a boolean.");
         }
         return texture;
     }
@@ -1413,20 +1405,20 @@ void main() {
                 ? imageArrayOrAtlasOrMipmap.getNumProvidedMipmaps()
                 : 1;
         if ((imageArrayOrAtlasOrMipmap instanceof TextureAtlasMipmapArray || imageArrayOrAtlasOrMipmap instanceof TextureArrayMipmapArray) && numProvidedMipmaps !== numAllocatedMipmaps) {
-            this.throwError("The number of provided mipmaps must be equal to the maximum number of mipmap levels in manual mipmap uploads.");
+            throw this.createError("The number of provided mipmaps must be equal to the maximum number of mipmap levels in manual mipmap uploads.");
         }
 
         const depth = imageArrayOrAtlasOrMipmap.getNumTextureLayers(); // Number of layers
         if (depth === 0) {
-            this.throwError("Cannot have empty texture source.");
+            throw this.createError("Cannot have empty texture source.");
         } else if (depth < 0) {
-            this.throwError("Cannot have negative texture sources.");
+            throw this.createError("Cannot have negative texture sources.");
         }
 
         if (numProvidedMipmaps === 0) {
-            this.throwError("no mipmaps provided"); // TODO: this should be a class check
+            throw this.createError("no mipmaps provided"); // TODO: this should be a class check
         } else if (numProvidedMipmaps < 0) {
-            this.throwError("negative mipmaps provided");
+            throw this.createError("negative mipmaps provided");
         }
 
         /* ---------- bind & pixel-store ---------- */
@@ -1444,25 +1436,25 @@ void main() {
 
         if (backgroundColor !== null) {
             if (backgroundColor.length !== 4) {
-                this.throwError("backgroundColor must be an array of 4 numbers.");
+                throw this.createError("backgroundColor must be an array of 4 numbers.");
             }
             gl.bindFramebuffer(gl.FRAMEBUFFER, this.clearFrameBuffer);
             const bgRed = backgroundColor[0];
             if (bgRed > 1.0 || bgRed < 0.0) {
                 // TODO: these errors should be put in a separate RgbaClampedColor class
-                this.throwError("backgroundColor[0] must be between 0.0 and 1.0.");
+                throw this.createError("backgroundColor[0] must be between 0.0 and 1.0.");
             }
             const bgGreen = backgroundColor[1];
             if (bgGreen > 1.0 || bgGreen < 0.0) {
-                this.throwError("backgroundColor[1] must be between 0.0 and 1.0.");
+                throw this.createError("backgroundColor[1] must be between 0.0 and 1.0.");
             }
             const bgBlue = backgroundColor[2];
             if (bgBlue > 1.0 || bgBlue < 0.0) {
-                this.throwError("backgroundColor[2] must be between 0.0 and 1.0.");
+                throw this.createError("backgroundColor[2] must be between 0.0 and 1.0.");
             }
             const bgAlpha = backgroundColor[3];
             if (bgAlpha > 1.0 || bgAlpha < 0.0) {
-                this.throwError("backgroundColor[3] must be between 0.0 and 1.0.");
+                throw this.createError("backgroundColor[3] must be between 0.0 and 1.0.");
             }
             gl.clearColor(bgRed, bgGreen, bgBlue, bgAlpha); // White background
         }
@@ -1554,7 +1546,7 @@ void main() {
         const location = gl.getUniformLocation(this.program, uniformName);
         if (location === null) {
             const msg = `Failed to get image location: ${uniformName} (location is invalid or unused)`;
-            this.throwError(msg);
+            throw this.createError(msg);
         }
         return location;
     }
@@ -1634,7 +1626,7 @@ void main() {
 
         const shader = gl.createShader(type);
         if (shader === null || shader === undefined) {
-            this.throwError("Failed to create shader.");
+            throw this.createError("Failed to create shader.");
         }
         gl.shaderSource(shader, source);
         gl.compileShader(shader);
@@ -1646,7 +1638,7 @@ void main() {
         console.log(gl.getShaderInfoLog(shader));
         gl.deleteShader(shader);
 
-        this.throwError("Failed to create shader.");
+        throw this.createError("Failed to create shader.");
     }
 
     createProgram(vertexShader: WebGLShader, fragmentShader: WebGLShader): WebGLProgram {
@@ -1654,7 +1646,7 @@ void main() {
 
         const program = gl.createProgram();
         if (program === null || program === undefined) {
-            this.throwError("Failed to create program.");
+            throw this.createError("Failed to create program.");
         }
         gl.attachShader(program, vertexShader);
         gl.attachShader(program, fragmentShader);
@@ -1667,7 +1659,7 @@ void main() {
         console.log(gl.getProgramInfoLog(program));
         gl.deleteProgram(program);
 
-        this.throwError("Failed to create program.");
+        throw this.createError("Failed to create program.");
     }
 
     setRectangle(
