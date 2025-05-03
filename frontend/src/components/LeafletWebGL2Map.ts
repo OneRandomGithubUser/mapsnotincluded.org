@@ -8,6 +8,9 @@ import { useRoute } from "vue-router";
 
 import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
+import 'leaflet.fullscreen';
+import 'leaflet.fullscreen/Control.FullScreen.css';
+
 import {createError} from "@/components/CreateCascadingError";
 
 interface TileCoords {
@@ -471,7 +474,13 @@ export class LeafletWebGL2Map {
             const msg = `Map container with htmlId ${htmlId} not found.`;
             throw this.createError(msg, true); //
         }
-        const leafletMap = L.map(mapElement, { crs: MapsNotIncludedCRS, minZoom: -5, maxZoom: 20, zoomSnap: 0 }).setView([0, 0], 4);
+        const leafletMap = L.map(mapElement, {
+            crs: MapsNotIncludedCRS,
+            minZoom: -5,
+            maxZoom: 20,
+            zoomSnap: 0,
+            fullscreenControl: true
+        }).setView([0, 0], 4);
 
         const PlaceholderLayer = L.TileLayer.extend({
             getTileUrl(_coords: TileCoords): string {
