@@ -483,8 +483,25 @@ export class LeafletWebGL2Map {
         }).setView([0, 0], 4);
 
         const PlaceholderLayer = L.TileLayer.extend({
-            getTileUrl(_coords: TileCoords): string {
-                return "/mode_nominal_256.png";
+            createTile: function (coords: L.Coords, done: (error: unknown, tile: HTMLImageElement) => void): HTMLImageElement {
+                const tile = document.createElement("img");
+
+                // Required by Leaflet: set dimensions before loading
+                tile.width = this.getTileSize().x;
+                tile.height = this.getTileSize().y;
+
+                // Delay loading the tile source
+                setTimeout(() => {
+                    tile.src = this.getTileUrl(coords);
+                }, 1000); // 1000 ms (1 second) delay
+
+                tile.onload = () => done(null, tile);
+                tile.onerror = (err) => done(err, tile);
+
+                return tile;
+            },
+            getTileUrl(coords: L.Coords): string {
+                return "/mode_nominal_256.png"; // your placeholder image
             },
             getAttribution(): string {
                 return "Klei Entertainment, Maps Not Included";
