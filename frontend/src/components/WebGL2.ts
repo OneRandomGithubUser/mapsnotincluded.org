@@ -316,6 +316,7 @@ export default class WebGL2CanvasManager {
     private readonly WORLD_DATA_TEXTURE_HEIGHT: number;
     private readonly clearFrameBuffer: WebGLFramebuffer;
     private readonly dataImageBgColor: number[];
+    private numProvidedNaturalTileMipmaps : number | null;
     constructor(defaultWidth: number = 300, defaultHeight: number = 300) {
         // Get a WebGL context
         this.canvas = new OffscreenCanvas(defaultWidth, defaultHeight);
@@ -348,6 +349,8 @@ export default class WebGL2CanvasManager {
         this.DATA_IMAGES_PER_SEED = 3;
 
         this.dataImageBgColor = [1.0, 1.0, 1.0, 1.0]; // white
+
+        this.numProvidedNaturalTileMipmaps = null;
 
         // Initialize the world data texture array
         {
@@ -454,6 +457,7 @@ export default class WebGL2CanvasManager {
                     ));
                 }
                 const naturalTilesImageAtlasWrapper = new TextureAtlasMipmapArray(naturalTilesImageAtlasTemp);
+                this.numProvidedNaturalTileMipmaps = naturalTilesImageAtlasWrapper.getNumProvidedMipmaps();
                 // TODO: rename to natural tiles everywhere
                 //const naturalTilesTextureArray = this.setupTextureArray(images[4], false, false, false);
                 const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlasWrapper, false, true, null);
@@ -505,10 +509,10 @@ export default class WebGL2CanvasManager {
         let layer: number;
         switch (renderLayer) {
             case RenderLayer.ELEMENT_BACKGROUND:
-                layer = 0; // TODO: make this more robust to changes
+                layer = 0; // TODO: make this more robust to changes with syncing to GLSL shader
                 break;
             case RenderLayer.ELEMENT_OVERLAY:
-                layer = 1; // TODO: make this more robust to changes
+                layer = 1;
                 break;
             case RenderLayer.TEMPERATURE_OVERLAY:
                 layer = 2;
@@ -617,8 +621,12 @@ export default class WebGL2CanvasManager {
 
         const NATURAL_TEXTURE_TILES_PER_CELL_X = 1 / 8;
         const NATURAL_TEXTURE_TILES_PER_CELL_Y = 1 / 8;
+        if (this.numProvidedNaturalTileMipmaps === null) {
+            throw this.createError("Natural tile mipmaps not provided.");
+        }
         const lodLevel = this.computeLodLevel(num_cells_width, num_cells_height, NATURAL_TEXTURE_TILES_PER_CELL_X, NATURAL_TEXTURE_TILES_PER_CELL_Y);
-        this.bind1UniformFloatsToUnit(lodLevel, "u_lod_level");
+        const clampedLodLevel = Math.max(Math.min(lodLevel, this.numProvidedNaturalTileMipmaps - 1), 0);
+        this.bind1UniformFloatsToUnit(clampedLodLevel, "u_lod_level");
         this.bind2UniformFloatsToUnit(NATURAL_TEXTURE_TILES_PER_CELL_X, NATURAL_TEXTURE_TILES_PER_CELL_Y, "u_natural_texture_tiles_per_cell");
         this.bindUniformBoolToUnit(false, "u_rendering_background"); // for foreground/world pass
 
@@ -1018,13 +1026,16 @@ void main() {
         gl.drawArrays(primitiveType, offset, count);
     }
 
-    private checkWebGLError() {
+    private checkWebGLError(printOnSuccess: boolean = false): void {
         const gl = this.gl;
         const error = gl.getError();
         const errorMsgPrefix = "WebGL error: ";
         switch (error) {
             case gl.NO_ERROR:
                 // No error, do nothing
+                if (printOnSuccess) {
+                    console.log("No WebGL error");
+                }
                 break;
             case gl.INVALID_ENUM:
                 throw this.createError(`${errorMsgPrefix} INVALID_ENUM`);

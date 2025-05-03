@@ -476,10 +476,12 @@ export class LeafletWebGL2Map {
             const msg = `Map container with htmlId ${htmlId} not found.`;
             throw this.createError(msg, true); //
         }
+        const LEAFLET_MAP_MIN_ZOOM = -5;
+        const LEAFLET_MAP_MAX_ZOOM = 20;
         const leafletMap = L.map(mapElement, {
             crs: MapsNotIncludedCRS,
-            minZoom: -5,
-            maxZoom: 20,
+            minZoom: LEAFLET_MAP_MIN_ZOOM,
+            maxZoom: LEAFLET_MAP_MAX_ZOOM,
             zoomSnap: 0,
             fullscreenControl: true
         }).setView([0, 0], 4);
@@ -647,14 +649,23 @@ export class LeafletWebGL2Map {
 
 
         (L.gridLayer as any).myCanvasLayer = (layerIndex: RenderLayer, opts?: L.GridLayerOptions) => new MyCanvasLayer(seed, this, layerIndex, opts);
-        const elementBackgroundLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.ELEMENT_BACKGROUND); // ElementIdx
+        const elementBackgroundLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.ELEMENT_BACKGROUND, {
+            minZoom: LEAFLET_MAP_MIN_ZOOM,
+            maxZoom: LEAFLET_MAP_MAX_ZOOM
+        }); // ElementIdx
         const elementOverlayLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.ELEMENT_OVERLAY, {
+            minZoom: LEAFLET_MAP_MIN_ZOOM,
+            maxZoom: LEAFLET_MAP_MAX_ZOOM,
             opacity: 0.8
         }); // Temperature
         const temperatureOverlayLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.TEMPERATURE_OVERLAY, {
+            minZoom: LEAFLET_MAP_MIN_ZOOM,
+            maxZoom: LEAFLET_MAP_MAX_ZOOM,
             opacity: 0.8
         }); // Temperature
         const massOverlayLayer = (L.gridLayer as any).myCanvasLayer(2, {
+            minZoom: LEAFLET_MAP_MIN_ZOOM,
+            maxZoom: LEAFLET_MAP_MAX_ZOOM,
             opacity: 0.8
         }); // Mass
 
