@@ -1,6 +1,6 @@
 // Confused? See https://webgl2fundamentals.org/webgl/lessons/webgl-fundamentals.html.
 
-import {WorldLayer} from "@/components/MapData";
+import {RenderLayer} from "@/components/MapData";
 import {bitmapToBase64} from "@/components/MediaToBase64";
 import {createError} from "@/components/CreateCascadingError";
 
@@ -487,7 +487,7 @@ export default class WebGL2CanvasManager {
         num_cells_bottom_edge_y: number,
         canvas_width: number,
         canvas_height: number,
-        worldLayer: WorldLayer
+        renderLayer: RenderLayer
     ): void {
         const gl = this.gl;
 
@@ -503,20 +503,23 @@ export default class WebGL2CanvasManager {
 
         // Set the currently rendering layer
         let layer: number;
-        switch (worldLayer) {
-            case WorldLayer.ELEMENT_IDX:
+        switch (renderLayer) {
+            case RenderLayer.ELEMENT_BACKGROUND:
                 layer = 0; // TODO: make this more robust to changes
                 break;
-            case WorldLayer.TEMPERATURE:
-                layer = 1;
+            case RenderLayer.ELEMENT_OVERLAY:
+                layer = 1; // TODO: make this more robust to changes
                 break;
-            case WorldLayer.MASS:
+            case RenderLayer.TEMPERATURE_OVERLAY:
                 layer = 2;
                 break;
+            case RenderLayer.MASS_OVERLAY:
+                layer = 3;
+                break;
             default:
-                throw this.createError(`Invalid world layer: ${worldLayer}`);
+                throw this.createError(`Invalid render layer: ${renderLayer}`);
         }
-        this.bind1UniformIntsToUnit(layer!, "u_worldLayer");
+        this.bind1UniformIntsToUnit(layer!, "u_render_layer");
 
         const massControlValues: Array<[number]> = [
             // [0], // Vacuum
@@ -682,7 +685,7 @@ uniform float u_lod_level;
 uniform vec2 u_natural_texture_tiles_per_cell;
 uniform bool u_rendering_background;
 uniform int u_worldSlot;   // which layer triplet to sample
-uniform int u_worldLayer; // which layer to sample
+uniform int u_render_layer; // which layer to sample
 
 uniform float u_massControlValues[10];
 uniform vec3 u_massControlColors[10];
@@ -848,9 +851,9 @@ void main() {
     vec2 v_worldCellPositionFloat = v_texCoord * vec2(paddedWorldSize);   
     // e.g. if v_texCoord = (0.123, 0.456) and paddedWorldSize = (636, 404) then v_worldCellPositionFloat = (78.228, 184.224)
    
-    switch (u_worldLayer) {
+    switch (u_render_layer) {
         case 0: {
-            // default: tile with texture/overlay
+            // default: element tile with texture/overlay
             
             if (u_rendering_background) {
                 vec4 space_background = texture(u_space_image_array, vec3(v_texCoord, 0));
@@ -859,7 +862,7 @@ void main() {
             } else {
                 // Look up a color from the texture.
                 vec4 elementIdxColorData = texture(u_world_data_image_array,
-                                 vec3(v_texCoord, float(u_worldSlot*3))); // Layer 0 = elementIdx8
+                                 vec3(v_texCoord, float(u_worldSlot*3+0))); // Layer 0 = elementIdx8
                                  
                 // The color is a grayscale value representing the element index, which we can just use the red channel for // NOTE: assumes grayscale
                 uint elementIdx = uint(elementIdxColorData.r * 255.0);
@@ -897,6 +900,37 @@ void main() {
             break;
         }
         case 1: {
+            // element overlay
+            
+            uint element_idx = 255u; // default value that should never be used
+            
+            if (u_rendering_background) {
+                element_idx = 176u; // Assume the background is vacuum
+            } else {
+                // Look up a color from the texture.
+                vec4 elementIdxColorData = texture(u_world_data_image_array,
+                                 vec3(v_texCoord, float(u_worldSlot*3+0))); // Layer 0 = elementIdx8
+                                 
+                // The color is a grayscale value representing the element index, which we can just use the red channel for
+                // If the color is white, it means there is no element, so we set the index to 176 (vacuum)
+                // NOTE: assumes grayscale
+                element_idx = elementIdxColorData == vec4(1.0, 1.0, 1.0, 1.0) ? 176u : uint(elementIdxColorData.r * 255.0);
+            }
+            
+            uint element_data_image_array_width = uint(textureSize(u_element_data_image_array, 0).z); // Get element data image resolution width
+            uint max_element_idx = element_data_image_array_width - 1u; // Get max defined element with element data image resolution width
+                  
+            if (element_idx < 0u || element_idx > max_element_idx) {
+                // element index is out of bounds, so use the error texture
+                ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                outColor = get_error_texture_color(cell_pos);
+            } else {
+                vec4 uiOverlayColor = texture(u_element_data_image_array, vec3(0, 0, element_idx));
+                outColor = uiOverlayColor;
+            }
+            break;
+        }
+        case 2: {
             // temperature 
             float temperature = -1.0; // default value that should never be used
             
@@ -923,7 +957,7 @@ void main() {
             
             break;
         }
-        case 2: {
+        case 3: {
             // mass layer
             float mass = -1.0; // default value that should never be used
             

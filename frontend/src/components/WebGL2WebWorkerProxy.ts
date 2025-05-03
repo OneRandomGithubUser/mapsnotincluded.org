@@ -1,5 +1,5 @@
 import WebGLWorker from "@/components/WebGL2WebWorker?worker";
-import {WorldLayer} from "@/components/MapData";
+import {RenderLayer} from "@/components/MapData";
 
 interface Action {
     type: string;
@@ -123,12 +123,12 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
         yOffset: number,
         canvasWidth: number,
         canvasHeight: number,
-        layerIndex: WorldLayer
+        layerIndex: RenderLayer
     ): Promise<void> {
         await this.runSequence([
             {
                 type: "render",
-                args: [worldWidth, worldHeight, width, height, xOffset, yOffset, canvasWidth, canvasHeight],
+                args: [worldWidth, worldHeight, width, height, xOffset, yOffset, canvasWidth, canvasHeight, layerIndex],
             },
         ]);
     }

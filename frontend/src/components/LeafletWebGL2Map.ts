@@ -1,4 +1,5 @@
-import WebGL2Proxy, {WorldLayer} from "@/components/WebGL2WebWorkerProxy";
+import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";
+import {RenderLayer} from "@/components/MapData";
 import {loadAndPad, loadImagesAsync} from "@/components/LoadImage";
 import {bitmapToBase64, canvasToBase64, imageToBase64} from "@/components/MediaToBase64";
 
@@ -95,7 +96,7 @@ export class LeafletWebGL2Map {
         this.webGLCanvasRef.value = canvasManager;
 
         console.log("Setting up canvas manager");
-        console.log("  Loading images");
+        console.log("  Loading initial images");
 
         const NATURAL_TILES_TEXTURE_SIZE = 1024;
 
@@ -512,7 +513,7 @@ export class LeafletWebGL2Map {
         (L.tileLayer as any).placeholderLayer().addTo(leafletMap);
 
         const MyCanvasLayer = L.GridLayer.extend({
-            initialize: function(seed: string, leafletWebGL2Map: LeafletWebGL2Map, layerIndex: WorldLayer, options: L.GridLayerOptions) {
+            initialize: function(seed: string, leafletWebGL2Map: LeafletWebGL2Map, layerIndex: RenderLayer, options: L.GridLayerOptions) {
                 this._mni_seed = seed;
                 this._mni_leafletWebGL2Map = leafletWebGL2Map;
                 this._mni_layerIndex = layerIndex;
@@ -644,26 +645,20 @@ export class LeafletWebGL2Map {
         });
 
 
-        (L.gridLayer as any).myCanvasLayer = (layerIndex: WorldLayer, opts?: L.GridLayerOptions) => new MyCanvasLayer(seed, this, layerIndex, opts);
-        const elementLayer = (L.gridLayer as any).myCanvasLayer(0); // ElementIdx
-        const temperatureLayer = (L.gridLayer as any).myCanvasLayer(1, {
+        (L.gridLayer as any).myCanvasLayer = (layerIndex: RenderLayer, opts?: L.GridLayerOptions) => new MyCanvasLayer(seed, this, layerIndex, opts);
+        const elementBackgroundLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.ELEMENT_BACKGROUND); // ElementIdx
+        const elementOverlayLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.ELEMENT_OVERLAY, {
             opacity: 0.8
         }); // Temperature
-        const massLayer = (L.gridLayer as any).myCanvasLayer(2, {
+        const temperatureOverlayLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.TEMPERATURE_OVERLAY, {
+            opacity: 0.8
+        }); // Temperature
+        const massOverlayLayer = (L.gridLayer as any).myCanvasLayer(2, {
             opacity: 0.8
         }); // Mass
 
-        const baseLayers: Record<string, L.Layer> = {
-            "Element": elementLayer
-        };
-
-        const overlayLayers: Record<string, L.Layer> = {
-            "Temperature": temperatureLayer,
-            "Mass": massLayer
-        };
-
         // Set initial layer
-        elementLayer.addTo(leafletMap);
+        elementBackgroundLayer.addTo(leafletMap);
 
         // Add the layer switcher control\
         // TODO: maybe switch this to a Vue component?
@@ -683,13 +678,18 @@ export class LeafletWebGL2Map {
                 L.DomEvent.disableClickPropagation(container);
 
                 const layers: Record<string, { layer: L.Layer; icon: string; label: string }> = {
-                    "_mni_temperature_layer": {
-                        layer: temperatureLayer,
+                    "_mni_element_overlay_layer": {
+                        layer: elementOverlayLayer,
+                        icon: "🔬",
+                        label: "Element"
+                    },
+                    "_mni_temperature_overlay_layer": {
+                        layer: temperatureOverlayLayer,
                         icon: "🌡️",
                         label: "Temperature"
                     },
-                    "_mni_mass_layer": {
-                        layer: massLayer,
+                    "_mni_mass_overlay_layer": {
+                        layer: massOverlayLayer,
                         icon: "🧱",
                         label: "Mass"
                     }

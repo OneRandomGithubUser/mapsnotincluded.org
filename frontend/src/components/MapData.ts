@@ -1,5 +1,6 @@
-export enum WorldLayer {
-    ELEMENT_IDX,
-    TEMPERATURE,
-    MASS
+export enum RenderLayer {
+    ELEMENT_BACKGROUND,
+    ELEMENT_OVERLAY,
+    TEMPERATURE_OVERLAY,
+    MASS_OVERLAY
 }
