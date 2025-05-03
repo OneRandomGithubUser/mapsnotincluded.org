@@ -280,7 +280,8 @@ export class LeafletWebGL2Map {
     private static drawErrorOverlay = (ctx: CanvasRenderingContext2D, width: number, height: number): void => {
         LeafletWebGL2Map.drawTextOverlay(ctx, width, height, [
             "ERROR",
-            "in loading tile"
+            "in loading tile",
+            "Please try again or notify us!"
         ]);
     }
 
