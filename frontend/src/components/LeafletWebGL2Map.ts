@@ -619,10 +619,23 @@ export class LeafletWebGL2Map {
 
 
         (L.gridLayer as any).myCanvasLayer = (layerIndex: WorldLayer, opts?: L.GridLayerOptions) => new MyCanvasLayer(seed, this, layerIndex, opts);
-        //(L.gridLayer as any).myCanvasLayer(0).addTo(leafletMap); // ElementIdx
-        //(L.gridLayer as any).myCanvasLayer(1).addTo(leafletMap); // Temperature
-        (L.gridLayer as any).myCanvasLayer(2).addTo(leafletMap); // Mass
+        const elementLayer = (L.gridLayer as any).myCanvasLayer(0); // ElementIdx
+        const temperatureLayer = (L.gridLayer as any).myCanvasLayer(1); // Temperature
+        const massLayer = (L.gridLayer as any).myCanvasLayer(2); // Mass
 
+        const baseLayers: Record<string, L.Layer> = {
+            "Element": elementLayer,
+            "Temperature": temperatureLayer,
+            "Mass": massLayer,
+        };
+
+        // Set initial layer
+        elementLayer.addTo(leafletMap);
+
+        // Add the layer switcher control
+        L.control.layers(baseLayers, undefined, { collapsed: false }).addTo(leafletMap);
+
+        // Add a scale control
         L.control.scale().addTo(leafletMap);
 
         // add more units to the Leaflet scale
