@@ -435,7 +435,40 @@ export class LeafletWebGL2Map {
 
             const worldCenterX = numCellsWorldWidth / 2 / this.ZOOM_0_CELLS_PER_MAP_UNIT;
             const worldCenterY = -numCellsWorldHeight / 2 / this.ZOOM_0_CELLS_PER_MAP_UNIT;
-            leafletMap.setView([worldCenterY, worldCenterX], boundedZoom);
+            const mapView: { center: L.LatLng, zoom: number } = {
+                center: L.latLng([worldCenterY, worldCenterX]),
+                zoom: boundedZoom,
+            }
+            leafletMap.setView(mapView.center, mapView.zoom);
+
+            const HomeControl = L.Control.extend({
+                options: {
+                    position: 'topleft' // top-left, top-right, bottom-left, bottom-right
+                },
+
+                onAdd: function (map: L.Map) {
+                    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
+
+                    container.innerHTML = '🗺️'; // TODO: 🏠
+                    container.style.backgroundColor = 'white';
+                    container.style.width = '30px';
+                    container.style.height = '30px';
+                    container.style.lineHeight = '30px';
+                    container.style.textAlign = 'center';
+                    container.style.cursor = 'pointer';
+
+                    // Prevent clicks from propagating to the map
+                    L.DomEvent.disableClickPropagation(container);
+
+                    container.onclick = function () {
+                        map.setView(mapView.center, mapView.zoom);
+                    };
+
+                    return container;
+                }
+            });
+            leafletMap.addControl(new HomeControl());
+
 
             leafletMapData.setIsReadyToRender(true);
             leafletMapData.clearSetupPromise();
