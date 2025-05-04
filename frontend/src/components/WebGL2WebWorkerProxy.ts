@@ -1,4 +1,4 @@
-import WebGLWorker from "@/components/WebGL2WebWorker?worker";
+import _WebGL2Worker from "@/components/WebGL2WebWorker?worker";
 import {RenderLayer} from "@/components/MapData";
 
 interface Action {
@@ -12,6 +12,7 @@ interface Result {
     error?: string;
 }
 
+// TODO: priority DAG of actions and callbacks, to accomodate things like cancelling actions and async callbacks
 class SequenceBuilder<T extends any[] = []> {
     private actions: Action[] = [];
 
@@ -27,6 +28,12 @@ class SequenceBuilder<T extends any[] = []> {
         this.actions.push({ type: "render", args });
         // unknown is needed, but even though the cast is safe (the types are controlled), TypeScript cannot prove it.
         return this as unknown as SequenceBuilder<[...T, void]>;
+    }
+
+    getIsReadyToRender(...args: Parameters<WebGL2Proxy["getIsReadyToRender"]>) {
+        this.actions.push({ type: "getIsReadyToRender", args });
+        // unknown is needed, but even though the cast is safe (the types are controlled), TypeScript cannot prove it.
+        return this as unknown as SequenceBuilder<[...T, boolean]>;
     }
 
     transferImageBitmap() {
@@ -57,14 +64,25 @@ class SequenceBuilder<T extends any[] = []> {
 
 export interface IWebGL2AsyncManager {
     setup(opts?: {
-            dataImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
-            elementDataImage?: HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
-            bgImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
-            tileImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
-            seed?: string
-          }
-    ): Promise<void>;
-    render(...args: any[]): Promise<void>; // TODO: use a more specific type as defined in WebGL2CanvasManager
+        dataImages?: Map<RenderLayer, HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[]>,
+        elementDataImage?: HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+        bgImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+        tileImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+        seed?: string
+    }): Promise<void>;
+    render(
+        seed: string,
+        numCellsWorldWidth: number,
+        numCellsWorldHeight: number,
+        num_cells_width: number,
+        num_cells_height: number,
+        num_cells_left_edge_x: number,
+        num_cells_bottom_edge_y: number,
+        canvas_width: number,
+        canvas_height: number,
+        renderLayer: RenderLayer
+    ): Promise<void>; // TODO: use a more specific type as defined in WebGL2CanvasManager
+    getIsReadyToRender(seed: string, renderLayer: RenderLayer): Promise<boolean>;
     clearCanvas(): Promise<void>;
     copyImageBlob(options?: ImageEncodeOptions): Promise<Blob>;
     transferImageBitmap(): Promise<ImageBitmap>;
@@ -76,7 +94,7 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
     private callbacks: Record<number, (results: Result[]) => void> = {};
 
     constructor(...initArgs: any[]) {
-        this.worker = new WebGLWorker();
+        this.worker = new _WebGL2Worker();
         this.worker.onmessage = this.handleMessage.bind(this);
         this.post("init", { args: initArgs });
     }
@@ -103,7 +121,7 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
     }
 
     async setup(opts?: {
-                    dataImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+        dataImages?: Map<RenderLayer, HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[]>,
                     elementDataImage?: HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
                     bgImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
                     tileImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
@@ -128,9 +146,21 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
         await this.runSequence([
             {
                 type: "render",
-                args: [worldWidth, worldHeight, width, height, xOffset, yOffset, canvasWidth, canvasHeight, layerIndex],
+                args: [seed, worldWidth, worldHeight, width, height, xOffset, yOffset, canvasWidth, canvasHeight, layerIndex],
             },
         ]);
+    }
+
+    /**
+     * Checks if the WebGL2 context is ready to render.
+     * @param renderLayer The layer to check.
+     * @returns A promise that resolves to a boolean indicating if the context is ready to render.
+     */
+    async getIsReadyToRender(seed: string, renderLayer: RenderLayer): Promise<boolean> {
+        const results = await this.runSequence([
+            { type: "getIsReadyToRender", args: [renderLayer] }
+        ]);
+        return results[0].value as boolean;
     }
 
     async clearCanvas(): Promise<void> {

@@ -23,13 +23,13 @@ interface TileCoords {
 class LeafletMapData {
     private map: L.Map;
     private isReadyToRender: boolean;
-    private setupPromise: Promise<void> | null;
+    private setupPromise: Map<RenderLayer, Promise<void> | null>;
     constructor(
         map: L.Map
     ) {
         this.map = map;
         this.isReadyToRender = false;
-        this.setupPromise = null;
+        this.setupPromise = new Map();
     }
     getMap(): L.Map {
         return this.map;
@@ -44,16 +44,24 @@ class LeafletMapData {
         this.isReadyToRender = isReadyToRender;
     }
 
-    getSetupPromise(): Promise<void> | null {
-        return this.setupPromise;
+    // Promise<void> means there is a currently running setup
+    // null means the render layer is already set up
+    // undefined means the render layer is not set up yet
+    getSetupPromise(renderLayer: RenderLayer): Promise<void> | null | undefined {
+        const promise = this.setupPromise.get(renderLayer);
+        return promise;
     }
 
-    setSetupPromise(promise: Promise<void>): void {
-        this.setupPromise = promise;
+    setSetupPromise(renderLayer: RenderLayer, promise: Promise<void>): void {
+        this.setupPromise.set(renderLayer, promise);
     }
 
-    clearSetupPromise(): void {
-        this.setupPromise = null;
+    clearSetupPromise(renderLayer: RenderLayer): void {
+        this.setupPromise.set(renderLayer, null);
+    }
+
+    createError(msg: string, doConsoleLog: Boolean = true, baseError?: unknown): Error {
+        return createError("LeafletMapData", msg, doConsoleLog, baseError);
     }
 }
 
@@ -80,7 +88,7 @@ export class LeafletWebGL2Map {
         //
     }
 
-    private createError(msg: string, doConsoleLog: Boolean = false, baseError?: unknown): Error {
+    private createError(msg: string, doConsoleLog: Boolean = true, baseError?: unknown): Error {
         return createError("LeafletWebGL2Map", msg, doConsoleLog, baseError);
     }
 
@@ -337,7 +345,7 @@ export class LeafletWebGL2Map {
             // this.mapData.delete(htmlId); // TODO: fix
         }
         for (const [htmlId, mapData] of this.mapData.entries()) {
-            console.log("mapData.getMap()", mapData.getMap());
+            console.log("Removing mapData.getMap()", mapData.getMap());
             this.mapData.delete(htmlId);
         }
     }
@@ -345,30 +353,70 @@ export class LeafletWebGL2Map {
     private async setupLeafletMap(
         leafletMap: L.Map,
         seed: string,
-        htmlId: string
+        htmlId: string,
+        renderLayer: RenderLayer
     ): Promise<void> {
         const leafletMapData = this.mapData.get(htmlId);
         if (!leafletMapData) {
             throw this.createError(`Map container with htmlId ${htmlId} not found.`);
         }
+        // NOTE: this assumes that, if a layer is set up, the map (but not necessarily other layers) is also set up
 
-        // Already set up?
-        if (leafletMapData.getIsReadyToRender()) {
+        // TODO: fix race conditions with leafletMapData with atomics or mutex
+
+        const existingPromise = leafletMapData.getSetupPromise(renderLayer);
+
+        // This layer already set up?
+        // TODO: think carefully about when to assume unique seeds, html id, version numbers, etc.
+        if (existingPromise === null) {
             return;
         }
 
-        // Already being set up?
-        const existing = leafletMapData.getSetupPromise();
-        if (existing) {
-            await existing;
+        // This layer already being set up?
+        if (existingPromise) {
+            await existingPromise;
             return;
         }
 
-        // First caller — begin setup
+        console.log(`Setting up leaflet map for seed=${seed} in setupLeafletMap()`);
+
+        // First caller - begin setup (existingPromise is undefined)
         const setup = (async () => {
+            /*
+            * TODO: Make it so it's ok if the local state thinks the canvas is ready but the canvas manager isn't, since we wait
+            * but there should not be a situation where the canvas manager thinks it's ready but the local state doesn't, unless there is a very narrow race condition
+            */
+            // Make sure canvas manager agrees with local state before starting
+            // Until the TO DO is done, this will account for multiple layers being setup by the same data images
+            const canvasManagerIsReadyArr = await this.webGLCanvasRef.value!.sequence().getIsReadyToRender(seed, renderLayer).exec();
+            const canvasManagerIsReady = !canvasManagerIsReadyArr.includes(false);
+            if (canvasManagerIsReady) {
+                // const msg = `Tried to double set up a currently ready canvas manager for seed=${seed} in setupLeafletMap()`;
+                // throw this.createError(msg, true);
+                leafletMapData.clearSetupPromise(renderLayer);
+                return;
+            }
+
+
             const base = `/world_data/${seed}`;
-            const urls = ["elementIdx8.png", "temperature32.png", "mass32.png"]
-                .map(p => `${base}/${p}`);
+            const urls: string[] = [];
+            // TODO: image versioning
+            switch (renderLayer) {
+                case RenderLayer.ELEMENT_BACKGROUND:
+                    urls.push(`${base}/elementIdx8.png`);
+                    break;
+                case RenderLayer.ELEMENT_OVERLAY:
+                    urls.push(`${base}/elementIdx8.png`);
+                    break;
+                case RenderLayer.TEMPERATURE_OVERLAY:
+                    urls.push(`${base}/temperature32.png`);
+                    break;
+                case RenderLayer.MASS_OVERLAY:
+                    urls.push(`${base}/mass32.png`);
+                    break;
+                default:
+                    throw this.createError(`Unknown render layer ${renderLayer} in setupLeafletMap()`);
+            }
 
             let bitmaps: ImageBitmap[];
             try {
@@ -391,12 +439,36 @@ export class LeafletWebGL2Map {
             }
 
             try {
-                await this.webGLCanvasRef.value!.sequence().setup({ dataImages: bitmaps, seed }).exec();
+                let bitmapMap = new Map<RenderLayer, ImageBitmap[]>();
+                // TODO: make this less hacky and more flexible to noncontiguous layers, if necessary
+                // use a switch statement in case we need to add more layers in the future
+                switch (renderLayer) {
+                    case RenderLayer.ELEMENT_BACKGROUND:
+                        bitmapMap.set(RenderLayer.ELEMENT_BACKGROUND, bitmaps);
+                        break;
+                    case RenderLayer.ELEMENT_OVERLAY:
+                        bitmapMap.set(RenderLayer.ELEMENT_OVERLAY, bitmaps);
+                        break;
+                    case RenderLayer.TEMPERATURE_OVERLAY:
+                        bitmapMap.set(RenderLayer.TEMPERATURE_OVERLAY, bitmaps);
+                        break;
+                    case RenderLayer.MASS_OVERLAY:
+                        bitmapMap.set(RenderLayer.MASS_OVERLAY, bitmaps);
+                        break;
+                    default:
+                        throw this.createError(`Unknown render layer ${renderLayer} in setupLeafletMap()`);
+                }
+                await this.webGLCanvasRef.value!.sequence().setup({ dataImages: bitmapMap, seed }).exec();
             } catch (err: unknown) {
                 const msg = `WebGL setup failed for seed=${seed} in setupLeafletMap()`;
                 throw this.createError(msg, true, err);
             }
 
+            // Don't set up the leaflet map itself if already setup
+            if (leafletMapData.getIsReadyToRender()) {
+                leafletMapData.clearSetupPromise(renderLayer);
+                return;
+            }
 
             const numCellsWorldWidth = bitmaps[0].width;
             const numCellsWorldHeight = bitmaps[0].height;
@@ -419,6 +491,7 @@ export class LeafletWebGL2Map {
                 ],
             ];
 
+            leafletMapData.setIsReadyToRender(true);
             leafletMap.setMaxBounds(bounds);
 
             // Get screen size (in pixels)
@@ -470,17 +543,16 @@ export class LeafletWebGL2Map {
             leafletMap.addControl(new HomeControl());
 
 
-            leafletMapData.setIsReadyToRender(true);
-            leafletMapData.clearSetupPromise();
+            leafletMapData.clearSetupPromise(renderLayer);
         })();
 
-        leafletMapData.setSetupPromise(setup);
+        leafletMapData.setSetupPromise(renderLayer, setup);
 
         try {
             await setup;
         } catch (err: unknown) {
             const msg = `Failed to set up Leaflet map for seed=${seed} in setupLeafletMap()`;
-            leafletMapData.clearSetupPromise(); // allow retry
+            leafletMapData.clearSetupPromise(renderLayer); // allow retry
             throw this.createError(msg, false, err);
         }
     }
@@ -549,10 +621,10 @@ export class LeafletWebGL2Map {
         (L.tileLayer as any).placeholderLayer().addTo(leafletMap);
 
         const MyCanvasLayer = L.GridLayer.extend({
-            initialize: function(seed: string, leafletWebGL2Map: LeafletWebGL2Map, layerIndex: RenderLayer, options: L.GridLayerOptions) {
+            initialize: function(seed: string, leafletWebGL2Map: LeafletWebGL2Map, renderLayer: RenderLayer, options: L.GridLayerOptions) {
                 this._mni_seed = seed;
                 this._mni_leafletWebGL2Map = leafletWebGL2Map;
-                this._mni_layerIndex = layerIndex;
+                this._mni_renderLayer = renderLayer;
                 L.setOptions(this, options);
             },
             createTile: function (coords: TileCoords, done: (error: unknown, tile: HTMLCanvasElement) => void): HTMLDivElement {
@@ -603,7 +675,7 @@ export class LeafletWebGL2Map {
                         return tileWrapper;
                     }
 
-                    this._mni_leafletWebGL2Map.initializeWebGL().then(async () => this._mni_leafletWebGL2Map.setupLeafletMap(leafletMap, seed, htmlId).then(async () => {
+                    this._mni_leafletWebGL2Map.initializeWebGL().then(async () => this._mni_leafletWebGL2Map.setupLeafletMap(leafletMap, seed, htmlId, this._mni_renderLayer).then(async () => {
                         const startTime = this._mni_leafletWebGL2Map.DEBUG_TILE_TIMING ? performance.now() : 0;
 
                         const numCellsWorldWidth = this._mni_leafletWebGL2Map.numCellsWorldWidthRef.value;
@@ -628,7 +700,7 @@ export class LeafletWebGL2Map {
                                     xyScale, xyScale,
                                     xOffset, yOffset,
                                     size.x, size.y,
-                                    this._mni_layerIndex
+                                    this._mni_renderLayer
                                 ).transferImageBitmap()
                                 .exec();
                             bitmap = bmp;
@@ -696,7 +768,7 @@ export class LeafletWebGL2Map {
             maxZoom: LEAFLET_MAP_MAX_ZOOM,
             opacity: 0.8
         }); // Temperature
-        const massOverlayLayer = (L.gridLayer as any).myCanvasLayer(2, {
+        const massOverlayLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.MASS_OVERLAY, {
             minZoom: LEAFLET_MAP_MIN_ZOOM,
             maxZoom: LEAFLET_MAP_MAX_ZOOM,
             opacity: 0.8

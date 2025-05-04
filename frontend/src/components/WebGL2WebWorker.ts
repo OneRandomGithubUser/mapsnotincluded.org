@@ -23,6 +23,7 @@ class WebGL2WorkerAdapter {
     constructor() {
         this.actionMap.set("setup", (...args) => this.instance!.setup(...args));
         this.actionMap.set("render", (...args) => this.instance!.render(...args));
+        this.actionMap.set("getIsReadyToRender", (...args) => this.instance!.getIsReadyToRender(...args));
         this.actionMap.set("clearCanvas", () => this.instance!.clearCanvas());
         this.actionMap.set("copyImageArrayBuffer", (...args) => this.instance!.copyImageArrayBuffer(...args));
         this.actionMap.set("transferImageBitmap", () => this.instance!.transferImageBitmap());
