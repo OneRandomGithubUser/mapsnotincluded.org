@@ -13,6 +13,8 @@ import 'leaflet.fullscreen';
 import 'leaflet.fullscreen/Control.FullScreen.css';
 
 import {createError} from "@/components/CreateCascadingError";
+import {LeafletExpandedScaleControl} from "@/components/LeafletExpandedScaleControl";
+import {LeafletLayerToggleControl} from "@/components/LeafletLayerToggleControl";
 
 interface TileCoords {
     x: number;
@@ -777,90 +779,20 @@ export class LeafletWebGL2Map {
         // Set initial layer
         elementBackgroundLayer.addTo(leafletMap);
 
-        // Add the layer switcher control\
-        // TODO: maybe switch this to a Vue component?
-        const LayerToggleControl = L.Control.extend({
-            options: {
-                position: 'topright'
-            },
+        // Add the layer switcher control
+        const layers = {
+            element: { layer: elementOverlayLayer, icon: "🔬", label: "Element" },
+            temperature: { layer: temperatureOverlayLayer, icon: "🌡️", label: "Temperature" },
+            mass: { layer: massOverlayLayer, icon: "🧱", label: "Mass" },
+        };
 
-            onAdd: function (map: L.Map) {
-                const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-custom');
-                container.style.background = 'white';
-                container.style.padding = '6px 8px';
-                container.style.display = 'flex';
-                container.style.flexDirection = 'column';
-                container.style.gap = '6px';
-
-                L.DomEvent.disableClickPropagation(container);
-
-                const layers: Record<string, { layer: L.Layer; icon: string; label: string }> = {
-                    "_mni_element_overlay_layer": {
-                        layer: elementOverlayLayer,
-                        icon: "🔬",
-                        label: "Element"
-                    },
-                    "_mni_temperature_overlay_layer": {
-                        layer: temperatureOverlayLayer,
-                        icon: "🌡️",
-                        label: "Temperature"
-                    },
-                    "_mni_mass_overlay_layer": {
-                        layer: massOverlayLayer,
-                        icon: "🧱",
-                        label: "Mass"
-                    }
-                };
-
-                let currentLayer: L.Layer | null = null;
-
-                Object.entries(layers).forEach(([name, { layer, icon, label }]) => {
-                    const button = document.createElement("button");
-                    button.type = "button";
-                    button.innerHTML = `${icon} ${label}`;
-                    button.style.padding = "6px 12px";
-                    button.style.font = "14px sans-serif";
-                    button.style.cursor = "pointer";
-                    button.style.border = "1px solid #ccc";
-                    button.style.borderRadius = "4px";
-                    button.style.background = "#f4f4f4";
-
-                    const toggleActiveStyle = (active: boolean) => {
-                        button.style.background = active ? "#0078ff" : "#f4f4f4";
-                        button.style.color = active ? "#fff" : "#000";
-                    };
-
-                    toggleActiveStyle(false);
-
-                    button.addEventListener("click", () => {
-                        const isAlreadyActive = currentLayer === layer;
-                        if (isAlreadyActive) {
-                            map.removeLayer(layer);
-                            currentLayer = null;
-                            toggleActiveStyle(false);
-                        } else {
-                            if (currentLayer) {
-                                map.removeLayer(currentLayer);
-                                // Reset all button styles
-                                [...container.querySelectorAll("button")].forEach(b => {
-                                    (b as HTMLButtonElement).style.background = "#f4f4f4";
-                                    (b as HTMLButtonElement).style.color = "#000";
-                                });
-                            }
-                            map.addLayer(layer);
-                            currentLayer = layer;
-                            toggleActiveStyle(true);
-                        }
-                    });
-
-                    container.appendChild(button);
-                });
-
-                return container;
-            }
+        const toggleControl = new LeafletLayerToggleControl({
+            position: 'topright',
+            className: 'custom-layer-toggle',
+            layers
         });
 
-        leafletMap.addControl(new LayerToggleControl());
+        leafletMap.addControl(toggleControl);
 
         // Add a scale control with more units
         const leafletExpandedScaleControl = new LeafletExpandedScaleControl({
