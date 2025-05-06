@@ -4,6 +4,8 @@ type LayerConfig = Record<string, {
     layer: L.Layer;
     icon: string;
     label: string;
+    soundOnSelectUrl?: string;
+    soundOnDeselectUrl?: string;
 }>;
 
 export interface LayerToggleOptions extends L.ControlOptions {
@@ -38,7 +40,7 @@ export const LeafletLayerToggleControl = L.Control.extend({
 
         let currentLayer: L.Layer | null = null;
 
-        Object.entries(this.options.layers).forEach(([name, { layer, icon, label }]) => {
+        Object.entries(this.options.layers).forEach(([name, { layer, icon, label, soundOnSelectUrl, soundOnDeselectUrl }]) => {
             const button = document.createElement("button");
             button.type = "button";
             button.innerHTML = `${icon} ${label}`;
@@ -48,6 +50,24 @@ export const LeafletLayerToggleControl = L.Control.extend({
             button.style.border = "1px solid #ccc";
             button.style.borderRadius = "4px";
             button.style.background = "#f4f4f4";
+
+            const selectSound = soundOnSelectUrl
+                ? new Audio(soundOnSelectUrl)
+                : null;
+
+            const deselectSound = soundOnDeselectUrl
+                ? new Audio(soundOnDeselectUrl)
+                : null;
+
+            const playSound = (sound: HTMLAudioElement | null) => {
+                if (!sound) return;
+                sound.pause();
+                sound.currentTime = 0;
+                sound.play().catch((err) => {
+                    // Some browsers block autoplay if there's no user interaction
+                    console.warn("Unable to play sound:", err);
+                });
+            };
 
             const toggleActiveStyle = (active: boolean) => {
                 button.style.background = active ? "#0078ff" : "#f4f4f4";
@@ -62,6 +82,7 @@ export const LeafletLayerToggleControl = L.Control.extend({
                     map.removeLayer(layer);
                     currentLayer = null;
                     toggleActiveStyle(false);
+                    playSound(deselectSound);
                 } else {
                     if (currentLayer) {
                         map.removeLayer(currentLayer);
@@ -73,6 +94,7 @@ export const LeafletLayerToggleControl = L.Control.extend({
                     map.addLayer(layer);
                     currentLayer = layer;
                     toggleActiveStyle(true);
+                    playSound(selectSound);
                 }
             });
 

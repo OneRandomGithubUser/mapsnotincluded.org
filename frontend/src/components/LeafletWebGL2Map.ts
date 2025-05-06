@@ -781,9 +781,15 @@ export class LeafletWebGL2Map {
 
         // Add the layer switcher control
         const layers = {
-            element: { layer: elementOverlayLayer, icon: "🔬", label: "Element" },
-            temperature: { layer: temperatureOverlayLayer, icon: "🌡️", label: "Temperature" },
-            mass: { layer: massOverlayLayer, icon: "🧱", label: "Mass" },
+            element: { layer: elementOverlayLayer, icon: "🔬", label: "Element",
+                soundOnSelectUrl: "/layer_sounds/SG_HUD_techView_suit_v02.wav",
+                soundOnDeselectUrl: "/layer_sounds/SG_HUD_techView_off_long.wav" },
+            temperature: { layer: temperatureOverlayLayer, icon: "🌡️", label: "Temperature",
+                soundOnSelectUrl: "/layer_sounds/SG_HUD_techView_temperature_v02.wav",
+                soundOnDeselectUrl: "/layer_sounds/SG_HUD_techView_off_long.wav" },
+            mass: { layer: massOverlayLayer, icon: "🧱", label: "Mass",
+                soundOnSelectUrl: "/layer_sounds/SG_HUD_techView_oxygen_v02.wav",
+                soundOnDeselectUrl: "/layer_sounds/SG_HUD_techView_off_long.wav" },
         };
 
         const toggleControl = new LeafletLayerToggleControl({
