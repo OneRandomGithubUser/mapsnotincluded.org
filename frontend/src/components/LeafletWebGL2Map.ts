@@ -15,6 +15,7 @@ import 'leaflet.fullscreen/Control.FullScreen.css';
 import {createError} from "@/components/CreateCascadingError";
 import {LeafletExpandedScaleControl} from "@/components/LeafletExpandedScaleControl";
 import {LeafletLayerToggleControl} from "@/components/LeafletLayerToggleControl";
+import {b} from "vite/dist/node/types.d-aGj9QkWt";
 
 interface TileCoords {
     x: number;
@@ -25,44 +26,66 @@ interface TileCoords {
 class LeafletMapData {
     private map: L.Map;
     private isReadyToRender: boolean;
-    private setupPromise: Map<RenderLayer, Promise<void> | null>;
+    private setupPromise: Map<RenderLayer, Promise<{numCellsWorldWidth: number, numCellsWorldHeight: number}> | null>;
+    private numCellsWorldWidth: number | null;
+    private numCellsWorldHeight: number | null;
     constructor(
-        map: L.Map
+        map: L.Map,
+        numCellsWorldWidth: number | null = null,
+        numCellsWorldHeight: number | null = null
     ) {
         this.map = map;
         this.isReadyToRender = false;
         this.setupPromise = new Map();
+        this.numCellsWorldWidth = numCellsWorldWidth;
+        this.numCellsWorldHeight = numCellsWorldHeight;
     }
-    getMap(): L.Map {
+    public getMap(): L.Map {
         return this.map;
     }
-    setMap(map: L.Map): void {
+    public setMap(map: L.Map): void {
         this.map = map;
     }
-    getIsReadyToRender(): boolean {
+    public getIsReadyToRender(): boolean {
         return this.isReadyToRender;
     }
-    setIsReadyToRender(isReadyToRender: boolean): void {
+    public setIsReadyToRender(isReadyToRender: boolean): void {
         this.isReadyToRender = isReadyToRender;
     }
 
-    // Promise<void> means there is a currently running setup
-    // null means the render layer is already set up
-    // undefined means the render layer is not set up yet
-    getSetupPromise(renderLayer: RenderLayer): Promise<void> | null | undefined {
+    /*
+     *  Promise<void> means there is a currently running setup
+     *  null means the render layer is already set up
+     *  undefined means the render layer is not set up yet
+     */
+    public getSetupPromise(renderLayer: RenderLayer): Promise<{numCellsWorldWidth: number, numCellsWorldHeight: number}> | null | undefined {
         const promise = this.setupPromise.get(renderLayer);
         return promise;
     }
 
-    setSetupPromise(renderLayer: RenderLayer, promise: Promise<void>): void {
+    public setSetupPromise(renderLayer: RenderLayer, promise: Promise<{numCellsWorldWidth: number, numCellsWorldHeight: number}>): void {
         this.setupPromise.set(renderLayer, promise);
     }
 
-    clearSetupPromise(renderLayer: RenderLayer): void {
+    public clearSetupPromise(renderLayer: RenderLayer): void {
         this.setupPromise.set(renderLayer, null);
     }
 
-    createError(msg: string, doConsoleLog: Boolean = true, baseError?: unknown): Error {
+    public setNumCellsWorldWidth(numCellsWorldWidth: number) {
+        this.numCellsWorldWidth = numCellsWorldWidth;
+    }
+    public getNumCellsWorldWidth(): number | null {
+        return this.numCellsWorldWidth;
+    }
+
+    public setNumCellsWorldHeight(numCellsWorldHeight: number) {
+        this.numCellsWorldHeight = numCellsWorldHeight;
+    }
+    public getNumCellsWorldHeight(): number | null {
+        return this.numCellsWorldHeight;
+    }
+
+    private createError(msg: string, doConsoleLog: Boolean = true, baseError?: unknown): Error {
         return createError("LeafletMapData", msg, doConsoleLog, baseError);
     }
 }
@@ -83,8 +106,6 @@ export class LeafletWebGL2Map {
     private readonly mapData: Map<string, LeafletMapData> = new Map();
     private readonly webGLCanvasRef: Ref<WebGL2Proxy | null> = ref(null);
     private readonly webGLInitPromiseRef: Ref<Promise<void> | null> = ref(null);
-    private readonly numCellsWorldWidthRef: Ref<number | null> = ref(null);
-    private readonly numCellsWorldHeightRef: Ref<number | null> = ref(null);
 
     constructor() {
         //
@@ -383,7 +404,7 @@ export class LeafletWebGL2Map {
         console.log(`Setting up leaflet map for seed=${seed} in setupLeafletMap()`);
 
         // First caller - begin setup (existingPromise is undefined)
-        const setup = (async () => {
+        const setup: Promise<void> = (async () => {
             /*
             * TODO: Make it so it's ok if the local state thinks the canvas is ready but the canvas manager isn't, since we wait
             * but there should not be a situation where the canvas manager thinks it's ready but the local state doesn't, unless there is a very narrow race condition
@@ -393,10 +414,10 @@ export class LeafletWebGL2Map {
             const canvasManagerIsReadyArr = await this.webGLCanvasRef.value!.sequence().getIsReadyToRender(seed, renderLayer).exec();
             const canvasManagerIsReady = !canvasManagerIsReadyArr.includes(false);
             if (canvasManagerIsReady) {
-                // const msg = `Tried to double set up a currently ready canvas manager for seed=${seed} in setupLeafletMap()`;
-                // throw this.createError(msg, true);
-                leafletMapData.clearSetupPromise(renderLayer);
-                return;
+                const msg = `Tried to double set up a currently ready canvas manager for seed=${seed} in setupLeafletMap()`;
+                throw this.createError(msg, true);
+                // leafletMapData.clearSetupPromise(renderLayer);
+                // return;
             }
 
 
@@ -475,8 +496,8 @@ export class LeafletWebGL2Map {
             const numCellsWorldWidth = bitmaps[0].width;
             const numCellsWorldHeight = bitmaps[0].height;
 
-            this.numCellsWorldWidthRef.value = numCellsWorldWidth;
-            this.numCellsWorldHeightRef.value = numCellsWorldHeight;
+            leafletMapData.setNumCellsWorldWidth(numCellsWorldWidth);
+            leafletMapData.setNumCellsWorldHeight(numCellsWorldHeight);
 
             const numMapUnitsWorldWidth = numCellsWorldWidth / this.ZOOM_0_CELLS_PER_MAP_UNIT;
             const numMapUnitsWorldHeight = numCellsWorldHeight / this.ZOOM_0_CELLS_PER_MAP_UNIT;
@@ -678,14 +699,18 @@ export class LeafletWebGL2Map {
                     }
 
                     this._mni_leafletWebGL2Map.initializeWebGL().then(async () => this._mni_leafletWebGL2Map.setupLeafletMap(leafletMap, seed, htmlId, this._mni_renderLayer).then(async () => {
-                        const startTime = this._mni_leafletWebGL2Map.DEBUG_TILE_TIMING ? performance.now() : 0;
-
-                        const numCellsWorldWidth = this._mni_leafletWebGL2Map.numCellsWorldWidthRef.value;
-                        const numCellsWorldHeight = this._mni_leafletWebGL2Map.numCellsWorldHeightRef.value;
-                        if (numCellsWorldWidth === null || numCellsWorldHeight === null) {
-                            const msg = `numCellsWorldWidth or numCellsWorldHeight is null for seed=${seed} in createTile()`;
+                        const leafletMapData = this._mni_leafletWebGL2Map.mapData.get(htmlId);
+                        const numCellsWorldWidth = leafletMapData.getNumCellsWorldWidth();
+                        if (numCellsWorldWidth === null) {
+                            const msg = `numCellsWorldWidth is null for seed=${seed} in createTile(). Please initialize it before retrieving it.`;
                             return createAndSendErrorTile(this._mni_leafletWebGL2Map.createError(msg), tile, errorCtx);
                         }
+                        const numCellsWorldHeight = leafletMapData.getNumCellsWorldHeight();
+                        if (numCellsWorldHeight === null) {
+                            const msg = `numCellsWorldHeight is null for seed=${seed} in createTile(). Please initialize it before retrieving it.`;
+                            return createAndSendErrorTile(this._mni_leafletWebGL2Map.createError(msg), tile, errorCtx);
+                        }
+                        const startTime = this._mni_leafletWebGL2Map.DEBUG_TILE_TIMING ? performance.now() : 0;
 
                         const canvasSize = this._mni_leafletWebGL2Map.get_map_units_per_cell_from_zoom(coords.z);
                         const xyScale = this._mni_leafletWebGL2Map.get_cells_per_zoom_0_map_tile_from_zoom(coords.z);
@@ -697,8 +722,8 @@ export class LeafletWebGL2Map {
                             const [_, bmp] = await this._mni_leafletWebGL2Map.webGLCanvasRef.value!.sequence()
                                 .render(
                                     seed,
-                                    this._mni_leafletWebGL2Map.numCellsWorldWidthRef.value!,
-                                    this._mni_leafletWebGL2Map.numCellsWorldHeightRef.value!,
+                                    numCellsWorldWidth,
+                                    numCellsWorldHeight,
                                     xyScale, xyScale,
                                     xOffset, yOffset,
                                     size.x, size.y,
