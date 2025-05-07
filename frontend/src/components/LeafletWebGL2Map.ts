@@ -11,6 +11,8 @@ import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
 import 'leaflet.fullscreen';
 import 'leaflet.fullscreen/Control.FullScreen.css';
+import { GestureHandling } from "leaflet-gesture-handling";
+import "leaflet-gesture-handling/dist/leaflet-gesture-handling.css";
 
 import {createError} from "@/components/CreateCascadingError";
 import {LeafletExpandedScaleControl} from "@/components/LeafletExpandedScaleControl";
@@ -606,13 +608,46 @@ export class LeafletWebGL2Map {
         }
         const LEAFLET_MAP_MIN_ZOOM = -100; // -5;
         const LEAFLET_MAP_MAX_ZOOM = 100; // 20;
+        console.log("GestureHandling", GestureHandling);
+        L.Map.addInitHook("addHandler", "gestureHandling", GestureHandling);
         const leafletMap = L.map(mapElement, {
             crs: MapsNotIncludedCRS,
             minZoom: LEAFLET_MAP_MIN_ZOOM,
             maxZoom: LEAFLET_MAP_MAX_ZOOM,
             zoomSnap: 0,
-            fullscreenControl: true
+            fullscreenControl: true,
+            gestureHandling: false // NOTE: do not set this to true! https://github.com/elmarquis/Leaflet.GestureHandling/issues/31#issuecomment-520782104
         }).setView([0, 0], 4);
+
+        // enable gesture handling AFTER initialization due to bug with Leaflet.GestureHandling
+        // see https://github.com/elmarquis/Leaflet.GestureHandling/issues/31#issuecomment-520782104
+        const gestureHandler = (leafletMap as any).gestureHandling;
+        console.log(gestureHandler.enabled());
+        (leafletMap as any).gestureHandling.enable();
+        console.log(gestureHandler.enabled());
+
+        // Add hint to use fullscreen to not have to use ctrl+zoom
+        leafletMap.whenReady(() => {
+            const container = leafletMap.getContainer();
+
+            // Get existing i18n scroll message set by Leaflet.GestureHandling
+            const originalScrollMsg = container.getAttribute("data-gesture-handling-scroll-content") ?? "";
+            const originalTouchMsg = container.getAttribute("data-gesture-handling-touch-content") ?? "";
+
+            // Append custom note (add spacing or separator as needed)
+            const customNote = " - or enter fullscreen";
+            container.setAttribute("data-gesture-handling-scroll-content", originalScrollMsg + customNote);
+            container.setAttribute("data-gesture-handling-touch-content", originalTouchMsg + customNote);
+        });
+
+        // disable Leaflet.GestureHandling when in fullscreen
+        leafletMap.on('enterFullscreen', () => {
+            const gestureHandler = (leafletMap as any).gestureHandling;
+            gestureHandler.disable();
+        });
+        leafletMap.on('exitFullscreen', () => {
+            gestureHandler.enable();
+        });
 
         const PlaceholderLayer = L.TileLayer.extend({
             createTile: function (coords: L.Coords, done: (error: unknown, tile: HTMLImageElement) => void): HTMLImageElement {
