@@ -1,6 +1,6 @@
 import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";
 import {RenderLayer} from "@/components/MapData";
-import {loadAndPad, loadImagesAsync} from "@/components/LoadImage";
+import {loadAndPad, loadBitmapsAsync, loadImagesAsync} from "@/components/LoadImage";
 import {bitmapToBase64, canvasToBase64, imageToBase64} from "@/components/MediaToBase64";
 
 import {onMounted, Ref, ref, watch} from "vue";
@@ -93,9 +93,10 @@ class LeafletMapData {
 }
 
 export class LeafletWebGL2Map {
-    private readonly DEBUG_OUTLINES = false;
-    private readonly DEBUG_URL_PRINT = false;
-    private readonly DEBUG_TILE_TIMING = false; // enable/disable debug timings
+    private readonly DEBUG_DO_DRAW_OUTLINES = false;
+    private readonly DEBUG_DO_PRINT_TILE_BASE_64 = false;
+    private readonly DEBUG_DO_PRINT_TILE_TIMING = false; // enable/disable debug timings
+    private readonly DEBUG_DO_PRINT_SETUP_TIMING = false; // enable/disable debug timings
 
     private readonly ZOOM_0_CELLS_PER_MAP_UNIT = 8; // Base tile size for the map - this is purposefully not 1 to make sure code accounts for this!!
     private readonly METERS_PER_CELL = 1;
@@ -118,137 +119,139 @@ export class LeafletWebGL2Map {
     }
 
     private initializeWebGL(): Promise<void> {
-    if (this.webGLInitPromiseRef.value) {
-        return this.webGLInitPromiseRef.value;
-    }
-
-    this.webGLInitPromiseRef.value = new Promise(async (resolve, reject) => { try {
-
-        console.log("Initializing canvas manager");
-        const canvasManager = new WebGL2Proxy();
-        this.webGLCanvasRef.value = canvasManager;
-
-        console.log("Setting up canvas manager");
-        console.log("  Loading initial images");
-
-        const NATURAL_TILES_TEXTURE_SIZE = 1024;
-
-        /*
-        const imageUrls: string[] = [
-            "/elementIdx8.png",
-            "/temperature32.png",
-            "/mass32.png",
-            "/element_data_1x1.png",
-            "/space_00.png",
-            "/space_01.png",
-        ];
-
-        for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
-            imageUrls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
+        if (this.webGLInitPromiseRef.value) {
+            return this.webGLInitPromiseRef.value;
         }
 
-        const images = await loadImagesAsync(imageUrls);
-        const imageBitmaps = await Promise.all(images.map(img => createImageBitmap(img)));
+        this.webGLInitPromiseRef.value = new Promise(async (resolve, reject) => { try {
 
-        numCellsWorldWidth.value = images[0].width;
-        numCellsWorldHeight.value = images[0].height;
+            const timings: DOMHighResTimeStamp[] = [];
+            timings.push(performance.now());
 
-         */
+            console.log("Initializing WebGL2");
+            console.log("  Initializing canvas manager");
+            const canvasManager = new WebGL2Proxy();
+            await canvasManager.init();
+            this.webGLCanvasRef.value = canvasManager;
 
-        // TODO: use an object for this
-        const bgImages: {
-            urls: string[],
-            images: HTMLImageElement[],
-            bitmaps: ImageBitmap[]
-        } = {
-            "urls": [
+            timings.push(performance.now());
+            console.log(`  Initialized canvas manager (${(timings[timings.length - 1] - timings[timings.length - 2]).toFixed(3)} ms)`);
+            console.log(`  Setting up canvas manager`);
+            console.log(`    Creating initial image URLs`);
+
+            const NATURAL_TILES_TEXTURE_SIZE = 1024;
+
+            /*
+            const imageUrls: string[] = [
+                "/elementIdx8.png",
+                "/temperature32.png",
+                "/mass32.png",
+                "/element_data_1x1.png",
                 "/space_00.png",
                 "/space_01.png",
-            ],
-            "images": [],
-            "bitmaps": []
-        }
-        const elementDataImage: {
-            urls: string[],
-            images: HTMLImageElement[],
-            bitmaps: ImageBitmap[]
-        } = {
-            "urls": [
-                "/element_data_1x1.png"
-            ],
-            "images": [],
-            "bitmaps": []
-        }
-        const tileImages: {
-            urls: string[],
-            images: HTMLImageElement[],
-            bitmaps: ImageBitmap[]
-        } = {
-            "urls": [],
-            "images": [],
-            "bitmaps": []
-        }
+            ];
 
-        for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
-            tileImages.urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
-        }
-
-        for (const imageData of [bgImages, elementDataImage, tileImages]) {
-            // TODO: batch async operations together better without awaiting for each one
-            const {successes, failures} = await loadImagesAsync(imageData.urls);
-            imageData.images = successes.map(success => success.image);
-            try {
-                imageData.bitmaps = await Promise.all(imageData.images.map(img => createImageBitmap(img)));
-            } catch (err: unknown) {
-                const msg = `Failed to create bitmaps from images for ${imageData.urls} in initializeWebGL()`;
-                throw this.createError(msg, true, err);
+            for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
+                imageUrls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
             }
-        }
 
-        // await canvasManager.setup(imageBitmaps);
-        await canvasManager.setup({
-            elementDataImage: elementDataImage.bitmaps[0],
-            bgImages: bgImages.bitmaps,
-            tileImages: tileImages.bitmaps,
-        });
+            const images = await loadImagesAsync(imageUrls);
+            const imageBitmaps = await Promise.all(images.map(img => createImageBitmap(img)));
 
-        console.log("Created canvas manager!");/*
-      TODO: make sure
-        const canvas_manager = canvasManager.value;
+            numCellsWorldWidth.value = images[0].width;
+            numCellsWorldHeight.value = images[0].height;
 
-        // call loadImages with random values for width, height, x, y
+             */
 
-        const scale = 10;
-        const { width, height, x_offset, y_offset, canvas_width, canvas_height } =
-            smallRender[id]
-                ? {
-                  width: 4,
-                  height: 4,
-                  x_offset: -128,
-                  y_offset: -128,
-                  canvas_width: 512,
-                  canvas_height: 512,
-                }
-                : {
-                  width: getRandomInt(636 / scale, 636 * 2 / scale),
-                  height: getRandomInt(404 / scale, 404 * 2 / scale),
-                  x_offset: getRandomInt(20, 30),
-                  y_offset: getRandomInt(20, 30),
-                  canvas_width: 636 * 2,
-                  canvas_height: 404 * 2,
-                };
+            // TODO: use an object for this
+            const bgImages: {
+                urls: string[],
+                images: HTMLImageElement[],
+                bitmaps: ImageBitmap[]
+            } = {
+                "urls": [
+                    "/space_00.png",
+                    "/space_01.png",
+                ],
+                "images": [],
+                "bitmaps": []
+            }
+            const elementDataImage: {
+                urls: string[],
+                images: HTMLImageElement[],
+                bitmaps: ImageBitmap[]
+            } = {
+                "urls": [
+                    "/element_data_1x1.png"
+                ],
+                "images": [],
+                "bitmaps": []
+            }
+            const tileImages: {
+                urls: string[],
+                images: HTMLImageElement[],
+                bitmaps: ImageBitmap[]
+            } = {
+                "urls": [],
+                "images": [],
+                "bitmaps": []
+            }
 
-        canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");});
-      }
-      */
-        resolve();
-    } catch (err: unknown) {
-        const msg = "Failed to initialize WebGL2 canvas manager in initializeWebGL()";
-        console.error(msg, err);
-        reject({reason: msg, error: err});
-    }});
+            for (let tileSize = NATURAL_TILES_TEXTURE_SIZE; tileSize >= 1; tileSize /= 2) {
+                tileImages.urls.push(`/tiles_mipmaps/${tileSize}x${tileSize}.png`);
+            }
 
-    return this.webGLInitPromiseRef.value;
+            timings.push(performance.now());
+            console.log(`    Created initial image URLs (${(timings[timings.length - 1] - timings[timings.length - 2]).toFixed(3)} ms)`);
+            console.log(`    Sending image URLs to canvas manager for loading`);
+
+            await canvasManager.sequence().setup({
+                elementDataImage: elementDataImage.urls[0],
+                bgImages: bgImages.urls,
+                tileImages: tileImages.urls,
+            }).exec();
+
+            timings.push(performance.now());
+            console.log(`    Sent images URLs to canvas manager and loaded (${(timings[timings.length - 1] - timings[timings.length - 2]).toFixed(3)} ms)`);
+
+            console.log(`Created canvas manager! (${(timings[timings.length - 1] - timings[0]).toFixed(3)} ms)`);
+            /*
+          TODO: make sure
+            const canvas_manager = canvasManager.value;
+
+            // call loadImages with random values for width, height, x, y
+
+            const scale = 10;
+            const { width, height, x_offset, y_offset, canvas_width, canvas_height } =
+                smallRender[id]
+                    ? {
+                      width: 4,
+                      height: 4,
+                      x_offset: -128,
+                      y_offset: -128,
+                      canvas_width: 512,
+                      canvas_height: 512,
+                    }
+                    : {
+                      width: getRandomInt(636 / scale, 636 * 2 / scale),
+                      height: getRandomInt(404 / scale, 404 * 2 / scale),
+                      x_offset: getRandomInt(20, 30),
+                      y_offset: getRandomInt(20, 30),
+                      canvas_width: 636 * 2,
+                      canvas_height: 404 * 2,
+                    };
+
+            canvas_manager.render(numCellsWorldWidth.value, numCellsWorldHeight.value, width, height, x_offset, y_offset, canvas_width, canvas_height, () => {console.log("render finished");});
+          }
+          */
+            resolve();
+        } catch (err: unknown) {
+            const msg = "Failed to initialize WebGL2 canvas manager in initializeWebGL()";
+            console.error(msg, err);
+            reject({reason: msg, error: err});
+        }});
+
+        return this.webGLInitPromiseRef.value;
     };
 
     /**
@@ -403,7 +406,11 @@ export class LeafletWebGL2Map {
             return;
         }
 
-        console.log(`Setting up leaflet map for seed=${seed} in setupLeafletMap()`);
+        const timings: DOMHighResTimeStamp[] = [];
+        if (this.DEBUG_DO_PRINT_SETUP_TIMING) {
+            timings.push(performance.now());
+            console.log(`  Setting up data image for seed=${seed} in setupLeafletMap()`);
+        }
 
         // First caller - begin setup (existingPromise is undefined)
         const setup: Promise<void> = (async () => {
@@ -489,10 +496,19 @@ export class LeafletWebGL2Map {
                 throw this.createError(msg, true, err);
             }
 
+            if (this.DEBUG_DO_PRINT_SETUP_TIMING) {
+                timings.push(performance.now());
+                console.log(`  Set up data image for seed=${seed} in setupLeafletMap() (${(timings[timings.length - 1] - timings[timings.length - 2]).toFixed(3)} ms)`);
+            }
+
             // Don't set up the leaflet map itself if already setup
             if (leafletMapData.getIsReadyToRender()) {
                 leafletMapData.clearSetupPromise(renderLayer);
                 return;
+            }
+
+            if (this.DEBUG_DO_PRINT_SETUP_TIMING) {
+                console.log(`  Setting up Leaflet map for seed=${seed} in setupLeafletMap()`);
             }
 
             const numCellsWorldWidth = bitmaps[0].width;
@@ -569,6 +585,11 @@ export class LeafletWebGL2Map {
 
 
             leafletMapData.clearSetupPromise(renderLayer);
+
+            if (this.DEBUG_DO_PRINT_SETUP_TIMING) {
+                timings.push(performance.now());
+                console.log(`  Set up Leaflet map for seed=${seed} in setupLeafletMap() (${(timings[timings.length - 1] - timings[timings.length - 2]).toFixed(3)} ms)`);
+            }
         })();
 
         leafletMapData.setSetupPromise(renderLayer, setup);
@@ -608,13 +629,13 @@ export class LeafletWebGL2Map {
         }
         const LEAFLET_MAP_MIN_ZOOM = -100; // -5;
         const LEAFLET_MAP_MAX_ZOOM = 100; // 20;
-        console.log("GestureHandling", GestureHandling);
         L.Map.addInitHook("addHandler", "gestureHandling", GestureHandling);
         const leafletMap = L.map(mapElement, {
             crs: MapsNotIncludedCRS,
             minZoom: LEAFLET_MAP_MIN_ZOOM,
             maxZoom: LEAFLET_MAP_MAX_ZOOM,
             zoomSnap: 0,
+            interactive: false,
             fullscreenControl: true,
             gestureHandling: false // NOTE: do not set this to true! https://github.com/elmarquis/Leaflet.GestureHandling/issues/31#issuecomment-520782104
         }).setView([0, 0], 4);
@@ -622,9 +643,7 @@ export class LeafletWebGL2Map {
         // enable gesture handling AFTER initialization due to bug with Leaflet.GestureHandling
         // see https://github.com/elmarquis/Leaflet.GestureHandling/issues/31#issuecomment-520782104
         const gestureHandler = (leafletMap as any).gestureHandling;
-        console.log(gestureHandler.enabled());
         (leafletMap as any).gestureHandling.enable();
-        console.log(gestureHandler.enabled());
 
         // Add hint to use fullscreen to not have to use ctrl+zoom
         leafletMap.whenReady(() => {
@@ -643,10 +662,12 @@ export class LeafletWebGL2Map {
         // disable Leaflet.GestureHandling when in fullscreen
         leafletMap.on('enterFullscreen', () => {
             const gestureHandler = (leafletMap as any).gestureHandling;
+            mapElement.style.pointerEvents = "auto";
             gestureHandler.disable();
         });
         leafletMap.on('exitFullscreen', () => {
             gestureHandler.enable();
+            mapElement.style.pointerEvents = "none";
         });
 
         const PlaceholderLayer = L.TileLayer.extend({
@@ -745,7 +766,7 @@ export class LeafletWebGL2Map {
                             const msg = `numCellsWorldHeight is null for seed=${seed} in createTile(). Please initialize it before retrieving it.`;
                             return createAndSendErrorTile(this._mni_leafletWebGL2Map.createError(msg), tile, errorCtx);
                         }
-                        const startTime = this._mni_leafletWebGL2Map.DEBUG_TILE_TIMING ? performance.now() : 0;
+                        const startTime = this._mni_leafletWebGL2Map.DEBUG_DO_PRINT_TILE_TIMING ? performance.now() : 0;
 
                         const canvasSize = this._mni_leafletWebGL2Map.get_map_units_per_cell_from_zoom(coords.z);
                         const xyScale = this._mni_leafletWebGL2Map.get_cells_per_zoom_0_map_tile_from_zoom(coords.z);
@@ -773,7 +794,7 @@ export class LeafletWebGL2Map {
 
                         try {
 
-                            if (this._mni_leafletWebGL2Map.DEBUG_OUTLINES) {
+                            if (this._mni_leafletWebGL2Map.DEBUG_DO_DRAW_OUTLINES) {
                                 const ctx = tile.getContext("2d")!;
                                 ctx.drawImage(bitmap, 0, 0);
                                 this._mni_leafletWebGL2Map.drawDebugInfo(ctx, coords, size.x, size.y);
@@ -782,13 +803,13 @@ export class LeafletWebGL2Map {
                                 ctx.transferFromImageBitmap(bitmap);
                             }
 
-                            if (this._mni_leafletWebGL2Map.DEBUG_URL_PRINT) {
+                            if (this._mni_leafletWebGL2Map.DEBUG_DO_PRINT_TILE_BASE_64) {
                                 canvasToBase64(tile).then(base64 => {
                                     console.log(`Tile (${coords.x},${coords.y},${coords.z}) base64:`, base64);
                                 });
                             }
 
-                            if (this._mni_leafletWebGL2Map.DEBUG_TILE_TIMING) {
+                            if (this._mni_leafletWebGL2Map.DEBUG_DO_PRINT_TILE_TIMING) {
                                 const endTime = performance.now();
                                 console.log(`Tile (${coords.x},${coords.y},${coords.z}) rendered in ${(endTime - startTime).toFixed(2)} ms`);
                             }
