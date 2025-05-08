@@ -431,35 +431,15 @@ export default class WebGL2CanvasManager {
             const elementDataImage = opts.elementDataImage;
             const bgImages = opts.bgImages;
             const tileImages = opts.tileImages;
+
             if (dataImages) {
                 const seed = opts.seed;
-                if (seed === undefined) {
-                    throw this.createError("Seed is required for data images.");
-                }
-                const worldDataImages = new Map<RenderLayer, readonly TexImageSource[]>();
-                for (const [renderLayer, imageArray] of dataImages.entries()) {
+                if (seed === undefined) throw this.createError("Seed is required for data images.");
+
+                // TODO: change this to take arbitrary (including noncontiguous) layer offsets
+                const worldDataPromises = Array.from(dataImages.entries()).map(async ([renderLayer, imageArray]) => {
                     const normalized = await this.normalizeImageInputArray(imageArray);
-                    worldDataImages.set(renderLayer, normalized);
-                }
-                for (const [renderLayer, dataImages] of worldDataImages) {
-                    // TODO: change this to take arbitrary (including noncontiguous) layer offsets
-
-                    // check if the layer is already set up
-                    if (this.isSeedRenderLayerReady.get(new SeedLayer(seed, renderLayer)) === true) {
-                        throw this.createError(`World data images already set up for seed: ${seed}, layer: ${renderLayer}`);
-                    }
-
-                    const worldDataImagesWrapper = new TextureArray(dataImages);
-                    const {textures: worldDataTextures, framebuffers} = this.setupTextures(dataImages);
-                    const dummyGetAtlasBoundsForLayer = (layerIndex: number, mipmapIndex: number) => {
-                        throw this.createError("Called dummy atlas bounds.");
-                        return {x: 0, y: 0, width: 0, height: 0};
-                    };
-                    const textureArray = this.worldDataArray;
-                    const imageArrayOrAtlasOrMipmap = worldDataImagesWrapper;
-                    const usePixelArtSettings = true;
-                    const flipTexturesY = false;
-                    const numAllocatedMipmaps = this.worldDataArrayNumMipmaps;
+                    const wrapper = new TextureArray(normalized);
                     const slot = this.acquireTextureSlot(seed);
                     let layerOffset: number = -1; // invalid value
                     const layersSuccessfullySetup: RenderLayer[] = [renderLayer];
@@ -486,72 +466,57 @@ export default class WebGL2CanvasManager {
                         throw this.createError(`Invalid layer offset: ${layerOffset}`);
                     }
                     // TODO: don't use seeds as unique keys, use UUIDs or similar to account for seed versions, multiple uploads, etc.
+                    const layerIdx = slot * this.DATA_IMAGES_PER_SEED + layerOffset;
+                    this.uploadTextureArray(this.worldDataArray, wrapper, true, false, this.worldDataArrayNumMipmaps, layerIdx, this.EXPLICIT_OUT_OF_BOUNDS_COLOR);
                     for (const currRenderLayer of layersSuccessfullySetup) {
                         this.isSeedRenderLayerReady.set(new SeedLayer(seed, currRenderLayer), true);
                     }
-                    const layerIdx = slot * this.DATA_IMAGES_PER_SEED + layerOffset;
-                    this.uploadTextureArray(textureArray, imageArrayOrAtlasOrMipmap, usePixelArtSettings, flipTexturesY, numAllocatedMipmaps, layerIdx, this.EXPLICIT_OUT_OF_BOUNDS_COLOR);
-                    this.textureLRU.set(seed, performance.now());
-                    // const worldEtmTextureArray = this.setupTextureArray(worldDataImagesWrapper, true, false);
-                    console.log(`World data images uploaded to texture array at slot ${slot} (index ${layerIdx}) for seed: ${seed}`);
-                }
-            }
-            if (elementDataImage) {
-                let elementDataImageAtlas: TexImageSource;
-                if (typeof elementDataImage === "string") {
-                    const normalized = await this.normalizeImageInputArray([elementDataImage]);
-                    elementDataImageAtlas = normalized[0];
-                } else {
-                    elementDataImageAtlas = elementDataImage;
-                }
-                console.log("elementDataImageAtlas", elementDataImageAtlas);
-                const getElementDataAtlasBounds = (layerIndex: number) => {
-                    return { x: layerIndex, y: 0, width: 1, height: 2 };
-                };
-                const elementDataImageAtlasWrapper = new TextureAtlas(
-                    elementDataImageAtlas,
-                    getElementDataAtlasBounds,
-                    elementDataImageAtlas.width
-                );
-                const elementDataTextureArray = this.setupTextureArray(elementDataImageAtlasWrapper, true, false, null);
-                // NOTE: assumption that the elementDataImageAtlas is a horizontal strip of 1x1 images. row 1 is the ui overlay color, row 2 is the element texture index (0-255, or invisible if there is none)
-                // TODO: does this need to be a texture array?
-                // this.bindTextureArrayToUnit(elementDataTextureArray, "u_element_data_image_array", 1);
-                this.elementDataTextureArray = elementDataTextureArray;
-            }
-            if (bgImages) {
-                const spaceBackgroundImages = await this.normalizeImageInputArray(bgImages);
-                const SPACE_TEXTURE_SIZE = 1024;
-                const spaceImagesWrapper = new TextureArray(spaceBackgroundImages);
-                // const { textures: spaceTextures } = this.setupTextures(spaceBackgroundImages);
-                const spaceTextureArray = this.setupTextureArray(spaceImagesWrapper, true, false, null);
-                // this.bindTextureArrayToUnit(spaceTextureArray, "u_space_image_array", 2);
-                this.spaceTextureArray = spaceTextureArray;
-            }
-            if (tileImages) {
-                const naturalTilesImageAtlas = await this.normalizeImageInputArray(tileImages);
-                let naturalTilesImageAtlasTemp : TextureAtlas[] = []; // TODO: remove temp if possible
-                const getNaturalTileAtlasBounds = (layerIndex: number, mipmapIndex: number) => {
-                    const textureSize = this.NATURAL_TILES_TEXTURE_SIZE / (2 ** mipmapIndex);
-                    return { x: layerIndex * textureSize, y: 0, width: textureSize, height: textureSize };
-                };
-                for (let i = 0; i < naturalTilesImageAtlas.length; i++) {
-                    naturalTilesImageAtlasTemp.push(new TextureAtlas(
-                        naturalTilesImageAtlas[i],
-                        getNaturalTileAtlasBounds,
-                        naturalTilesImageAtlas[0].width/this.NATURAL_TILES_TEXTURE_SIZE
-                    ));
-                }
-                const naturalTilesImageAtlasWrapper = new TextureAtlasMipmapArray(naturalTilesImageAtlasTemp);
-                this.numProvidedNaturalTileMipmaps = naturalTilesImageAtlasWrapper.getNumProvidedMipmaps();
-                // TODO: rename to natural tiles everywhere
-                //const naturalTilesTextureArray = this.setupTextureArray(images[4], false, false, false);
-                const naturalTilesTextureArray = this.setupTextureArray(naturalTilesImageAtlasWrapper, false, true, null);
-                // this.bindTextureArrayToUnit(naturalTilesTextureArray, "u_natural_tile_image_array", 3);
-                this.naturalTilesTextureArray = naturalTilesTextureArray;
+                });
 
+                setupTasks.push(Promise.all(worldDataPromises).then(() => {
+                    this.textureLRU.set(seed, performance.now());
+                }));
             }
+
+            if (elementDataImage) {
+                const task = (async () => {
+                    const arr = await this.normalizeImageInputArray([elementDataImage]);
+                    const atlas = arr[0];
+                    const wrapper = new TextureAtlas(atlas, (i) => ({ x: i, y: 0, width: 1, height: 2 }), atlas.width);
+                    this.elementDataTextureArray = this.setupTextureArray(wrapper, true, false, null);
+                })();
+                setupTasks.push(task);
+            }
+
+            if (bgImages) {
+                const task = (async () => {
+                    const normalized = await this.normalizeImageInputArray(bgImages);
+                    const wrapper = new TextureArray(normalized);
+                    this.spaceTextureArray = this.setupTextureArray(wrapper, true, false, null);
+                })();
+                setupTasks.push(task);
+            }
+
+            if (tileImages) {
+                const task = (async () => {
+                    const normalized = await this.normalizeImageInputArray(tileImages);
+                    const mips: TextureAtlas[] = normalized.map((img, i) =>
+                        new TextureAtlas(img, (layer, mip) => {
+                            const size = this.NATURAL_TILES_TEXTURE_SIZE / (2 ** mip);
+                            return { x: layer * size, y: 0, width: size, height: size };
+                        }, normalized[0].width / this.NATURAL_TILES_TEXTURE_SIZE)
+                    );
+                    const wrapper = new TextureAtlasMipmapArray(mips);
+                    this.numProvidedNaturalTileMipmaps = wrapper.getNumProvidedMipmaps();
+                    // TODO: rename to natural tiles everywhere
+                    this.naturalTilesTextureArray = this.setupTextureArray(wrapper, false, true, null);
+                })();
+                setupTasks.push(task);
+            }
+
+            await Promise.all(setupTasks);
         }
+
         console.log("Textures set up successfully.");
         if (!this.elementDataTextureArray || !this.spaceTextureArray || !this.naturalTilesTextureArray) {
             console.warn("Textures not yet fully loaded. Skipping binding. Please call setup(...) using elementDataImage, bgImages, and tileImages first.");
