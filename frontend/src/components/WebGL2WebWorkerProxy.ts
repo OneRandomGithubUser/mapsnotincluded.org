@@ -1,5 +1,6 @@
 import _WebGL2Worker from "@/components/WebGL2WebWorker?worker";
 import {RenderLayer} from "@/components/MapData";
+import {createError} from "@/components/CreateCascadingError";
 
 interface Action {
     type: string;
@@ -9,7 +10,7 @@ interface Action {
 interface Result {
     success: boolean;
     value?: any;
-    error?: string;
+    error?: any ;
 }
 
 // TODO: priority DAG of actions and callbacks, to accomodate things like cancelling actions and async callbacks
@@ -17,6 +18,12 @@ class SequenceBuilder<T extends any[] = []> {
     private actions: Action[] = [];
 
     constructor(private proxy: WebGL2Proxy) {}
+
+    init(...args: Parameters<WebGL2Proxy["init"]>) {
+        this.actions.push({ type: "init", args });
+        // unknown is needed, but even though the cast is safe (the types are controlled), TypeScript cannot prove it.
+        return this as unknown as SequenceBuilder<[...T, void]>;
+    }
 
     setup(...args: Parameters<WebGL2Proxy["setup"]>) {
         this.actions.push({ type: "setup", args });
@@ -51,7 +58,7 @@ class SequenceBuilder<T extends any[] = []> {
     async exec(): Promise<T> {
         const results = await this.proxy.runSequence(this.actions);
         const resolved = results.map((r, i) => {
-            if (!r.success) throw new Error(`Action ${this.actions[i].type} failed: ${r.error}`);
+            if (!r.success) throw this.createError(`Action "${this.actions[i].type}" failed`, false, r.error);
             if (this.actions[i].type === "copyImageArrayBuffer") {
                 return new Blob([r.value], this.actions[i].args?.[0]);
             }
@@ -59,15 +66,19 @@ class SequenceBuilder<T extends any[] = []> {
         });
         return resolved as T;
     }
+    private createError(msg: string, doConsoleLog: boolean = true, baseError?: unknown): Error {
+        return createError("SequenceBuilder", msg, doConsoleLog, baseError);
+    }
 }
 
 
 export interface IWebGL2AsyncManager {
+    init(...initArgs: any[]): Promise<void>;
     setup(opts?: {
-        dataImages?: Map<RenderLayer, HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[]>,
-        elementDataImage?: HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
-        bgImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
-        tileImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+        dataImages?: Map<RenderLayer, readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[]>,
+        elementDataImage?: string | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+        bgImages?: readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
+        tileImages?: readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
         seed?: string
     }): Promise<void>;
     render(
@@ -93,10 +104,22 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
     private requestId = 0;
     private callbacks: Record<number, (results: Result[]) => void> = {};
 
-    constructor(...initArgs: any[]) {
+    constructor() {
         this.worker = new _WebGL2Worker();
         this.worker.onmessage = this.handleMessage.bind(this);
-        this.post("init", { args: initArgs });
+        // this.post("init", { args: initArgs });
+    }
+
+    /**
+     * Initializes the WebGL2 worker.
+     * @param initArgs Arguments to pass to the worker for initialization.
+     * @returns A promise that resolves when the worker is initialized.
+     */
+    public async init(...initArgs: any[]): Promise<void> {
+        return new Promise((resolve) => {
+            const requestId = this.post("init", { args: initArgs });
+            this.callbacks[requestId] = () => resolve();
+        });
     }
 
     private post(type: string, payload: any, transfer: Transferable[] = []): number {
@@ -107,7 +130,7 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
 
     private handleMessage(event: MessageEvent): void {
         const { type, requestId, results } = event.data;
-        if (type === "runSequenceComplete" && this.callbacks[requestId]) {
+        if ((type === "runSequenceComplete" || type === "initComplete") && this.callbacks[requestId]) {
             this.callbacks[requestId](results);
             delete this.callbacks[requestId];
         }
@@ -120,11 +143,11 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
         });
     }
 
-    async setup(opts?: {
-        dataImages?: Map<RenderLayer, HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[]>,
-                    elementDataImage?: HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
-                    bgImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
-                    tileImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+    public async setup(opts?: {
+        dataImages?: Map<RenderLayer, readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[]>,
+                    elementDataImage?: string | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+                    bgImages?: string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
+                    tileImages?: string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
                     seed?: string
                 }
     ): Promise<void> {
@@ -184,6 +207,10 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
 
     sequence() {
         return new SequenceBuilder(this);
+    }
+
+    private createError(msg: string, doConsoleLog: boolean = true, baseError?: unknown): Error {
+        return createError("WebGL2Proxy", msg, doConsoleLog, baseError);
     }
 
 }
