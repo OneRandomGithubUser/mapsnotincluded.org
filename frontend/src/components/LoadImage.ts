@@ -72,6 +72,41 @@ const loadImagesAsync = async (urls: string[]): Promise<{
     return { successes, failures };
 };
 
+export const loadBitmapsAsync = async (
+    urls: string[],
+    options?: ImageBitmapOptions
+): Promise<{
+    successes: { url: string, bitmap: ImageBitmap }[],
+    failures: { url: string, error: any }[]
+}> => {
+    const results = await Promise.allSettled(
+        urls.map(async url => {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.statusText}`);
+                const blob = await response.blob();
+                const bitmap = await createImageBitmap(blob, options);
+                return { url, bitmap };
+            } catch (error) {
+                throw new Error(`Failed to load bitmap for ${url}`, { cause: error });
+            }
+        })
+    );
+
+    const successes: { url: string, bitmap: ImageBitmap }[] = [];
+    const failures: { url: string, error: any }[] = [];
+
+    for (const result of results) {
+        if (result.status === "fulfilled") {
+            successes.push(result.value);
+        } else {
+            failures.push({ url: "", error: result.reason });
+        }
+    }
+
+    return { successes, failures };
+};
+
 export async function loadAndPad(
     url: string,
     w: number,
