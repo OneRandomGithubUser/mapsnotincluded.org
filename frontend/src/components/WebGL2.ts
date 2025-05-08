@@ -425,7 +425,6 @@ export default class WebGL2CanvasManager {
 
         const setupTasks: Promise<void>[] = [];
 
-        console.log("Textures start set up.");
         if (opts) {
             const dataImages = opts.dataImages;
             const elementDataImage = opts.elementDataImage;
@@ -517,7 +516,6 @@ export default class WebGL2CanvasManager {
             await Promise.all(setupTasks);
         }
 
-        console.log("Textures set up successfully.");
         if (!this.elementDataTextureArray || !this.spaceTextureArray || !this.naturalTilesTextureArray) {
             console.warn("Textures not yet fully loaded. Skipping binding. Please call setup(...) using elementDataImage, bgImages, and tileImages first.");
             return;
