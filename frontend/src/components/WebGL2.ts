@@ -2,6 +2,7 @@
 
 import {RenderLayer} from "@/components/MapData";
 import {createError} from "@/components/CreateCascadingError";
+import {loadBitmapsAsync, loadImagesAsync} from "@/components/LoadImage";
 
 function getCanvasImageSourceDims(
     source: TexImageSource
@@ -37,7 +38,7 @@ interface TextureLevel {
     getTextureHeight() : number;
 }
 interface TextureLevelMipmapArray {
-    getMipmapArray() : TextureLevel[];
+    getMipmapArray() : readonly TextureLevel[];
     getMipmapLevel(index: number) : TextureLevel;
     getNumProvidedMipmaps(): number;
     getNumTextureLayers() : number;
@@ -177,10 +178,10 @@ class TextureAtlas implements TextureLevel {
     }
 }
 class TextureArray implements TextureLevel {
-    private readonly imageArray: TexImageSource[];
+    private readonly imageArray: readonly TexImageSource[];
     private readonly width: number;
     private readonly height: number;
-    constructor(imageArray: TexImageSource[]) {
+    constructor(imageArray: readonly TexImageSource[]) {
         if (imageArray.length <= 0) {
             throw new Error("ImageArray length must be a positive integer");
         }
@@ -228,9 +229,9 @@ class TextureArray implements TextureLevel {
     }
 }
 class TextureAtlasMipmapArray implements TextureLevelMipmapArray {
-    private readonly imageMipmaps: TextureAtlas[];
+    private readonly imageMipmaps: readonly TextureAtlas[];
     private readonly depth: number;
-    constructor(imageMipmaps: TextureAtlas[]) {
+    constructor(imageMipmaps: readonly TextureAtlas[]) {
         if (imageMipmaps.length <= 0) {
             throw new Error("No image mipmaps found.");
         }
@@ -250,7 +251,7 @@ class TextureAtlasMipmapArray implements TextureLevelMipmapArray {
     getNumProvidedMipmaps() : number {
         return this.imageMipmaps.length;
     }
-    getMipmapArray() : TextureLevel[] {
+    getMipmapArray() : readonly TextureLevel[] {
         return this.imageMipmaps;
     }
     getNumTextureLayers(): number {
@@ -261,9 +262,9 @@ class TextureAtlasMipmapArray implements TextureLevelMipmapArray {
     }
 }
 class TextureArrayMipmapArray implements TextureLevelMipmapArray {
-    private readonly imageMipmaps: TextureArray[];
+    private readonly imageMipmaps: readonly TextureArray[];
     private readonly depth: number;
-    constructor(imageMipmaps: TextureArray[]) {
+    constructor(imageMipmaps: readonly TextureArray[]) {
         if (imageMipmaps.length <= 0) {
             throw new Error("No image mipmaps found.");
         }
@@ -284,7 +285,7 @@ class TextureArrayMipmapArray implements TextureLevelMipmapArray {
     getNumProvidedMipmaps() : number {
         return this.imageMipmaps.length;
     }
-    getMipmapArray() : TextureLevel[] {
+    getMipmapArray() : readonly TextureLevel[] {
         return this.imageMipmaps;
     }
     getNumTextureLayers(): number {
@@ -405,23 +406,26 @@ export default class WebGL2CanvasManager {
             gl.bindFramebuffer(gl.FRAMEBUFFER, null);
         }
     }
-    setup(
+    async setup(
         opts?: {
-            dataImages?: Map<RenderLayer, HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[]>,
-            elementDataImage?: HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
-            bgImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
-            tileImages?: HTMLImageElement[] | HTMLCanvasElement[] | OffscreenCanvas[] | ImageBitmap[],
+            dataImages?: Map<RenderLayer, readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[]>,
+            elementDataImage?: string | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
+            bgImages?: readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
+            tileImages?: readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
             seed?: string
         }
-    ) : void {
+    ) : Promise<void> {
         // TODO: lazy texture loading with large images
         const gl = this.gl;
 
         const texCoordBuffer = this.setupTextureBuffers("a_texCoord");
-        //this.setRectangle(positionBuffer, num_pixels_num_cells_left_edge_x, num_pixels_num_cells_bottom_edge_y, num_pixels_world_width, num_pixels_world_height);
 
         // provide texture coordinates for the rectangle.
+        //this.setRectangle(positionBuffer, num_pixels_num_cells_left_edge_x, num_pixels_num_cells_bottom_edge_y, num_pixels_world_width, num_pixels_world_height);
 
+        const setupTasks: Promise<void>[] = [];
+
+        console.log("Textures start set up.");
         if (opts) {
             const dataImages = opts.dataImages;
             const elementDataImage = opts.elementDataImage;
@@ -432,7 +436,11 @@ export default class WebGL2CanvasManager {
                 if (seed === undefined) {
                     throw this.createError("Seed is required for data images.");
                 }
-                const worldDataImages = dataImages;
+                const worldDataImages = new Map<RenderLayer, readonly TexImageSource[]>();
+                for (const [renderLayer, imageArray] of dataImages.entries()) {
+                    const normalized = await this.normalizeImageInputArray(imageArray);
+                    worldDataImages.set(renderLayer, normalized);
+                }
                 for (const [renderLayer, dataImages] of worldDataImages) {
                     // TODO: change this to take arbitrary (including noncontiguous) layer offsets
 
@@ -489,7 +497,14 @@ export default class WebGL2CanvasManager {
                 }
             }
             if (elementDataImage) {
-                const elementDataImageAtlas = elementDataImage;
+                let elementDataImageAtlas: TexImageSource;
+                if (typeof elementDataImage === "string") {
+                    const normalized = await this.normalizeImageInputArray([elementDataImage]);
+                    elementDataImageAtlas = normalized[0];
+                } else {
+                    elementDataImageAtlas = elementDataImage;
+                }
+                console.log("elementDataImageAtlas", elementDataImageAtlas);
                 const getElementDataAtlasBounds = (layerIndex: number) => {
                     return { x: layerIndex, y: 0, width: 1, height: 2 };
                 };
@@ -505,8 +520,8 @@ export default class WebGL2CanvasManager {
                 this.elementDataTextureArray = elementDataTextureArray;
             }
             if (bgImages) {
+                const spaceBackgroundImages = await this.normalizeImageInputArray(bgImages);
                 const SPACE_TEXTURE_SIZE = 1024;
-                const spaceBackgroundImages = bgImages;
                 const spaceImagesWrapper = new TextureArray(spaceBackgroundImages);
                 // const { textures: spaceTextures } = this.setupTextures(spaceBackgroundImages);
                 const spaceTextureArray = this.setupTextureArray(spaceImagesWrapper, true, false, null);
@@ -514,7 +529,7 @@ export default class WebGL2CanvasManager {
                 this.spaceTextureArray = spaceTextureArray;
             }
             if (tileImages) {
-                const naturalTilesImageAtlas = tileImages;
+                const naturalTilesImageAtlas = await this.normalizeImageInputArray(tileImages);
                 let naturalTilesImageAtlasTemp : TextureAtlas[] = []; // TODO: remove temp if possible
                 const getNaturalTileAtlasBounds = (layerIndex: number, mipmapIndex: number) => {
                     const textureSize = this.NATURAL_TILES_TEXTURE_SIZE / (2 ** mipmapIndex);
@@ -537,6 +552,7 @@ export default class WebGL2CanvasManager {
 
             }
         }
+        console.log("Textures set up successfully.");
         if (!this.elementDataTextureArray || !this.spaceTextureArray || !this.naturalTilesTextureArray) {
             console.warn("Textures not yet fully loaded. Skipping binding. Please call setup(...) using elementDataImage, bgImages, and tileImages first.");
             return;
@@ -568,8 +584,11 @@ export default class WebGL2CanvasManager {
     ): void {
         const gl = this.gl;
 
-        if (!this.isReadyToRender || this.isSeedRenderLayerReady.get(new SeedLayer(seed, renderLayer)) === false) {
-            throw this.createError("Textures not yet fully loaded. Do not call render(...) at this time, wait for setup(...) to finish.");
+        if (!this.isReadyToRender) {
+            throw this.createError("Base textures not yet fully loaded. Do not call render(...) at this time, wait for setup(...) to finish.");
+        }
+        if (this.isSeedRenderLayerReady.get(new SeedLayer(seed, renderLayer)) === false) {
+            throw this.createError("Seed layer data image not yet fully loaded. Do not call render(...) at this time, wait for setup(...) to finish.");
         }
 
         this.resizeCanvas(canvas_width, canvas_height);
@@ -1143,6 +1162,32 @@ void main() {
 `;
         return fragmentShaderSource;
     }
+
+    private async normalizeImageInputArray(input: any): Promise<(HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap)[]> {
+        if (!Array.isArray(input)) {
+            throw this.createError("Expected an array for image input");
+        }
+
+        if (input.every(url => typeof url === "string")) {
+            // Convert string URLs to HTMLImageElements using loadImagesAsync
+            const {successes, failures} = await loadBitmapsAsync(input);
+            if (failures.length > 0) {
+                throw this.createError(`Failed to load images: ${failures.join(", ")}`);
+            }
+            return successes.map(success => success.bitmap);
+        } else if (input.every(img => typeof HTMLImageElement !== "undefined" && img instanceof HTMLImageElement)) {
+            return input;
+        } else if (input.every(canvas => typeof HTMLCanvasElement !== "undefined" && canvas instanceof HTMLCanvasElement)) {
+            return input;
+        } else if (input.every(offscreen => typeof OffscreenCanvas !== "undefined" && offscreen instanceof OffscreenCanvas)) {
+            return input;
+        } else if (input.every(bitmap => typeof ImageBitmap !== "undefined" && bitmap instanceof ImageBitmap)) {
+            return input;
+        } else {
+            throw this.createError("Invalid or mixed image array types");
+        }
+    }
+
     public getIsReadyToRender(seed: string, renderLayer: RenderLayer): boolean {
         if (!this.isReadyToRender) {
             return false;
@@ -1464,7 +1509,7 @@ void main() {
     }
 
     setupTextures(
-        images: (TexImageSource)[]
+        images: readonly (TexImageSource)[]
     ) : {
         textures: WebGLTexture[],
         framebuffers: WebGLFramebuffer[]
