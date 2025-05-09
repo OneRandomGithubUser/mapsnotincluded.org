@@ -48,13 +48,15 @@ class MapData {
     public index: number;
     public uploadUuid: UploadUuid;
     public dataImageBaseUrl: Url;
-    constructor(mapSize: MapSize, leafletBoxBounds: LeafletBoxBounds, seed: string, index: number, uploadUuid: UploadUuid, dataImageBaseUrl: Url) {
+    public isVisible: boolean;
+    constructor(mapSize: MapSize, leafletBoxBounds: LeafletBoxBounds, seed: string, index: number, uploadUuid: UploadUuid, dataImageBaseUrl: Url, isVisible: boolean = true) {
         this.mapSize = mapSize;
         this.leafletBoxBounds = leafletBoxBounds;
         this.seed = seed;
         this.index = index;
         this.uploadUuid = uploadUuid;
         this.dataImageBaseUrl = dataImageBaseUrl;
+        this.isVisible = isVisible;
     }
 }
 
@@ -108,6 +110,11 @@ export class LeafletMessageBrowserIframe {
     public remove() {
         cancelAnimationFrame(this.animationFrameId);
         this.controller.abort();
+
+        for (const [uploadUuid, mapDatum] of this.mapData) {
+            this.removeMapDom(mapDatum);
+        }
+        this.mapData.clear();
     }
 
     // Fake wheel event to the Leaflet map. Workaround for the iframe not receiving wheel events.
@@ -282,16 +289,7 @@ export class LeafletMessageBrowserIframe {
 
             const mapClippingWrapper = this.mapClippingWrapper;
             mapClippingWrapper.style.visibility = isVisible ? "visible" : "hidden";
-            const newUuids = new Set<UploadUuid>(receivedMapData.keys());
-            const activeUuids = new Set<UploadUuid>(this.mapData.keys());
-
-            // TODO: check if this is needed
-            if (!this.areSetsEqual(newUuids, activeUuids)) {
-                // window.parent.postMessage({ type: "seed-change", seedList: mapContainers.map(m => m.seed) }, "*");
-                // lastSeeds = newUuids;
-                this.changeMapDom(mapClippingWrapper, receivedMapData, this.mapData); // TODO: class to sync maps, with an action on add, change, and remove?
-                // activeUuids = newUuids;
-            }
+            this.changeMapDom(mapClippingWrapper, receivedMapData, this.mapData); // TODO: class to sync maps, with an action on add, change, and remove?
 
             const { left: visLeft, top: visTop, right: visRight, bottom: visBottom } = visibleScrollBounds[0]; // for now, assume there is only one visible scroll bounds
             for (const [uploadUuid, receivedMapDatum] of receivedMapData) {
@@ -340,11 +338,6 @@ export class LeafletMessageBrowserIframe {
                 if (hasSizeChanged) {
                     curr.mapSize = {mapWidth, mapHeight};
                     this.leafletWebGl2Map.resizeMap(curr.uploadUuid);
-                }
-            }
-            for (const seed of this.mapData.keys()) {
-                if (!newUuids.has(seed)) {
-                    this.mapData.delete(seed);
                 }
             }
         } catch (err) {
@@ -399,11 +392,46 @@ export class LeafletMessageBrowserIframe {
         // LeafletWebGL2Map.value.destroyInstance(seed); // TODO: check if this is needed
     }
 
+    private showMapDom(mapDatum: MapData) {
+        const mapContainerId = this.getMapContainerId(mapDatum.uploadUuid);
+        const mapContainer = document.getElementById(mapContainerId);
+        if (!mapContainer) {
+            console.error(`Map container with id ${mapContainerId} not found`);
+            throw new Error(`Map container with id ${mapContainerId} not found`);
+        }
+        mapDatum.isVisible = true;
+        mapContainer.style.visibility = "visible";
+    }
+
+    private hideMapDom(mapDatum: MapData) {
+        const mapContainerId = this.getMapContainerId(mapDatum.uploadUuid);
+        const mapContainer = document.getElementById(mapContainerId);
+        if (!mapContainer) {
+            console.error(`Map container with id ${mapContainerId} not found`);
+            throw new Error(`Map container with id ${mapContainerId} not found`);
+        }
+        mapDatum.isVisible = false;
+        mapContainer.style.visibility = "hidden";
+    }
+
     private changeMapDom(mapClippingWrapper: HTMLDivElement, newMapData: Map<string, MapData>, oldMapData: Map<string, MapData>) {
         // add new maps
-        for (const [uploadUuid, mapDatum] of newMapData) if (!oldMapData.has(uploadUuid)) this.addMapDom(mapClippingWrapper, mapDatum);
+        for (const [uploadUuid, mapDatum] of newMapData) {
+            if (!oldMapData.has(uploadUuid)) {
+                this.addMapDom(mapClippingWrapper, mapDatum);
+            } else if (oldMapData.get(uploadUuid)?.isVisible === false) {
+                this.showMapDom(mapDatum);
+            }
+        }
         // remove old maps
-        for (const [uploadUuid, mapDatum] of oldMapData) if (!newMapData.has(uploadUuid)) this.removeMapDom(mapDatum);
+        for (const [uploadUuid, mapDatum] of oldMapData) {
+            if (!newMapData.has(uploadUuid)) {
+                // Don't delete old maps, just hide them so that they can be reused
+                // this.removeMapDom(mapDatum);
+                // this.mapData.delete(uploadUuid);
+                this.hideMapDom(mapDatum);
+            }
+        }
     }
 
     private areSetsEqual = (setA: Set<string>, setB: Set<string>) => {

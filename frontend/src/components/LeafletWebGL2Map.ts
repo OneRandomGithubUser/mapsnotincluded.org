@@ -399,9 +399,14 @@ export class LeafletWebGL2Map {
         const existingPromise = leafletMapData.getSetupPromise(renderLayer);
 
         // This layer already set up?
-        // TODO: think carefully about when to assume unique seeds, html id, version numbers, etc.
         if (existingPromise === null) {
-            return;
+            // This layer hasn't been evicted by the LRU cache?
+            const canvasManagerIsReadyArr = await this.webGLCanvasRef.value!.sequence().getIsReadyToRender(seed, renderLayer).exec(); // TODO: await needed?
+            const canvasManagerIsReady = !canvasManagerIsReadyArr.includes(false);
+            if (canvasManagerIsReady) console.log(`Canvas manager is already ready for seed=${seed} in setupLeafletMap()`);
+            if (canvasManagerIsReady) {
+                return;
+            }
         }
 
         // This layer already being set up?
@@ -429,7 +434,8 @@ export class LeafletWebGL2Map {
             if (canvasManagerIsReady) {
                 // TODO: should this throw an error? or return? No need to reupload images if still cached in the canvas manager
 
-                // const msg = `Tried to double set up a currently ready canvas manager for seed=${seed} in setupLeafletMap()`;
+                const msg = `Tried to double set up a currently ready canvas manager for seed=${seed} in setupLeafletMap()`;
+                console.warn(msg);
                 // throw this.createError(msg, true);
 
                 // leafletMapData.clearSetupPromise(renderLayer);
