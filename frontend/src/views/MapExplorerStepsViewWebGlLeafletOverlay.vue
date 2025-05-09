@@ -145,8 +145,8 @@ iframe {
   display: flex;
   flex-direction: column;
   padding: 15px;
-  pointer-events: auto;
   z-index: 1; /* Ensure the map is above the iframe */
+  pointer-events: none; /* Allow scrolling to pass through to the iframe */
 }
 
 .leaflet-map {
