@@ -3,6 +3,9 @@ import {Ref, ref} from "vue"
 import "leaflet/dist/leaflet.css";
 import * as L from "leaflet";
 import {LeafletWebGL2Map} from "@/components/LeafletWebGL2Map";
+import {createError} from "@/components/CreateCascadingError";
+import {DomEvent} from "leaflet";
+import stopPropagation = DomEvent.stopPropagation;
 
 type LeafletBoxBounds = {
     left: number
@@ -25,6 +28,15 @@ type MapSize = {
     mapHeight: number
 }
 
+class MapData {
+    public mapSize: MapSize;
+    public leafletBoxBounds: LeafletBoxBounds;
+    constructor(mapSize: MapSize, leafletBoxBounds: LeafletBoxBounds) {
+        this.mapSize = mapSize;
+        this.leafletBoxBounds = leafletBoxBounds;
+    }
+}
+
 interface LeafletBoxesMessage {
     type: "leafletBoxes"
     boxesJson: string
@@ -34,19 +46,25 @@ interface LeafletBoxesMessage {
  * Syncs the Leaflet map position to the data from the iframe via postMessage.
  */
 export class LeafletMessageBrowserIframe {
+    private readonly DEBUG_PRINT_FORWARDED_INTERACTION_EVENTS = false;
+
     private readonly iframe: HTMLIFrameElement;
     private readonly leafletWebGl2Map: LeafletWebGL2Map;
-    private readonly mapData: Map<string, MapSize>;
+    private readonly mapData: Map<string, MapData>;
     private readonly mapClippingWrapper: HTMLDivElement;
     private animationFrameId: number;
     private readonly controller: AbortController;
+    private visibleScrollBounds: VisibleScrollBounds[];
+    private isVisible: boolean;
 
     constructor(iframe: HTMLIFrameElement, mapClippingWrapper: HTMLDivElement, leafletWebGl2Map: LeafletWebGL2Map) {
         this.iframe = iframe;
-        this.mapData = new Map<string, MapSize>();
+        this.mapData = new Map<string, MapData>();
         this.mapClippingWrapper = mapClippingWrapper;
         this.leafletWebGl2Map = leafletWebGl2Map;
         this.controller = new AbortController();
+        this.visibleScrollBounds = [];
+        this.isVisible = false;
 
         this.animationFrameId = requestAnimationFrame(this.requestLeafletBoxes.bind(this));
 
@@ -57,12 +75,185 @@ export class LeafletMessageBrowserIframe {
             },
             { signal: this.controller.signal }
         )
+        window.addEventListener("message", (event: MessageEvent<any>) => {
+            /*
+            if (event.data?.type === "iframeWheel") {
+                console.log("event", event);
+                this.handleIframeWheel(event.data);
+            }
+
+             */
+            if (typeof event.data?.type === "string" && event.data.type.startsWith("iframe:")) {
+                this.handleIframeEvent(event.data);
+            }
+        }, { signal: this.controller.signal });
+
     }
 
     public remove() {
         cancelAnimationFrame(this.animationFrameId);
         this.controller.abort();
     }
+
+    private handleIframeEvent(data: {
+        type: string;
+        clientX: number;
+        clientY: number;
+        [key: string]: any;
+    }) {
+        const { type, clientX, clientY } = data;
+
+        for (const [seed, mapData] of this.mapData.entries()) {
+            const { left, top, right, bottom } = mapData.leafletBoxBounds;
+            if (clientX >= left && clientX <= right && clientY >= top && clientY <= bottom) {
+                const mapDivId = this.getLeafletMapId(seed);
+                const mapDiv = document.getElementById(mapDivId);
+                if (!mapDiv) {
+                    console.warn(`Map DOM not found for seed ${seed}`);
+                    return;
+                }
+
+                const nativeType = type.replace(/^iframe:/, "");
+
+                let event: Event;
+
+                if (nativeType === "wheel") {
+                    event = new WheelEvent(nativeType, {
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: data.clientX,
+                        clientY: data.clientY,
+                        deltaX: data.deltaX ?? 0,
+                        deltaY: data.deltaY ?? 0,
+                        deltaZ: data.deltaZ ?? 0,
+                        deltaMode: data.deltaMode ?? 0,
+                        ctrlKey: data.ctrlKey ?? false,
+                        metaKey: data.metaKey ?? false,
+                        shiftKey: data.shiftKey ?? false,
+                        altKey: data.altKey ?? false
+                    });
+                } else if (nativeType.startsWith("pointer")) {
+                    event = new PointerEvent(nativeType, data);
+                } else if (nativeType.startsWith("mouse") || nativeType === "contextmenu" || nativeType === "click" || nativeType === "dblclick") {
+                    event = new MouseEvent(nativeType, data);
+                } else if (nativeType.startsWith("key")) {
+                    event = new KeyboardEvent(nativeType, data);
+                } else if (nativeType.startsWith("drag")) {
+                    event = new DragEvent(nativeType, data);
+                } else {
+                    console.warn("Unhandled event type:", nativeType);
+                    return;
+                }
+
+                mapDiv.dispatchEvent(event);
+                if (this.DEBUG_PRINT_FORWARDED_INTERACTION_EVENTS) {
+                    console.log(`Dispatched ${nativeType} to map ${seed}`);
+                }
+
+                // Fake a mouse event for pointer events
+                // NOTE: hacky workaround for Leaflet not handling pointer events correctly
+                if (nativeType === "pointerdown" || nativeType === "pointermove" || nativeType === "pointerup") {
+                    // Get mouse event name from pointer event name
+                    const mouseEventName = nativeType.replace("pointer", "mouse");
+                    const syntheticMouseDown = new MouseEvent(mouseEventName, {
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: data.clientX,
+                        clientY: data.clientY,
+                        button: data.button,
+                        buttons: data.buttons,
+                        ctrlKey: data.ctrlKey,
+                        metaKey: data.metaKey,
+                        shiftKey: data.shiftKey,
+                        altKey: data.altKey
+                    });
+
+                    mapDiv.dispatchEvent(syntheticMouseDown);
+                    if (this.DEBUG_PRINT_FORWARDED_INTERACTION_EVENTS) {
+                        console.log(`Dispatched synthetic mouse event to map ${seed}`);
+                    }
+                }
+
+                // Fake a mouse over event for pointer events
+                // NOTE: hacky workaround for Leaflet.GestureHandling not handling pointer events correctly
+                if (nativeType === "pointermove") {
+                    const syntheticMouseOver = new MouseEvent("mouseover", {
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: data.clientX,
+                        clientY: data.clientY,
+                        button: data.button,
+                        buttons: data.buttons,
+                        ctrlKey: data.ctrlKey,
+                        metaKey: data.metaKey,
+                        shiftKey: data.shiftKey,
+                        altKey: data.altKey
+                    });
+
+                    mapDiv.dispatchEvent(syntheticMouseOver);
+                    if (this.DEBUG_PRINT_FORWARDED_INTERACTION_EVENTS) {
+                        console.log(`Dispatched synthetic mouse event to map ${seed}`);
+                    }
+                }
+                return;
+            }
+        }
+    }
+
+    // Fake wheel event to the Leaflet map. Workaround for the iframe not receiving wheel events.
+    // TODO: possibly move the map code to the iframe to avoid this issue
+    // TODO: if not, fake pointer events to the iframe too
+    /*
+    private handleIframeWheel(data: {
+        ctrlKey: boolean,
+        metaKey: boolean,
+        deltaY: number,
+        clientX: number,
+        clientY: number
+    }) {
+        const { clientX, clientY, deltaY, ctrlKey, metaKey } = data;
+
+        // NOTE: undefined behavior if there are overlapping maps
+        for (const [seed, mapData] of this.mapData.entries()) {
+            const {left, top, right, bottom, seed, index} = mapData.leafletBoxBounds;
+            if (
+                clientX >= left &&
+                clientX <= right &&
+                clientY >= top &&
+                clientY <= bottom
+            ) {
+                // Found the map under the cursor
+                const mapDivId = this.getLeafletMapId(seed);
+                const mapDiv = document.getElementById(mapDivId);
+                if (!mapDiv) {
+                    console.warn(`Map DOM not found for seed ${seed}`);
+                    return;
+                }
+
+                // Create a synthetic wheel event
+                const wheelEvent = new WheelEvent("wheel", {
+                    bubbles: true,
+                    cancelable: true,
+                    clientX,
+                    clientY,
+                    deltaY,
+                    ctrlKey,
+                    metaKey
+                });
+
+                // Dispatch the event to the Leaflet map's container
+                mapDiv.dispatchEvent(wheelEvent);
+                // TODO: this manual dispatch event might not work on Retina displays, should be tested
+                console.log(`Dispatched wheel event to map: ${seed}`);
+
+                // stopPropagation
+                stopPropagation(wheelEvent);
+                return; // Only dispatch to the first matching map
+            }
+        }
+    }
+    */
+
 
     private parseLeafletBoxesData(event: MessageEvent<LeafletBoxesMessage>) {
         try {
@@ -71,10 +262,10 @@ export class LeafletMessageBrowserIframe {
             // TODO: remove this debug code
             const debugPredefinedSeeds = [
                 "SWMP-C-1827596172-0-0-0",
-                "invalid-seed-test",
-                null,
                 "M-BAD-C-687529253-0-0-0",
                 "V-OASIS-C-1888383654-0-0-F33",
+                "invalid-seed-test",
+                null,
                 "M-BAD-C-687529253-0-0-0 - duplicate and whitespace test",
                 "M-BAD-C-687529253-0-0-0-missing-elementIdx8",
                 "M-BAD-C-687529253-0-0-0-missing-mass32",
@@ -87,7 +278,9 @@ export class LeafletMessageBrowserIframe {
             // const mapContainers: LeafletBoxBounds[] = boxes["map-containers"];
 
             const visibleScrollBounds: VisibleScrollBounds[] = boxes["visible-scroll-bounds"];
+            this.visibleScrollBounds = visibleScrollBounds;
             const isVisible: boolean = boxes["visible"];
+            this.isVisible = isVisible;
 
             if (!visibleScrollBounds || visibleScrollBounds.length === 0) {
                 return;
@@ -114,8 +307,7 @@ export class LeafletMessageBrowserIframe {
                 const mapContainerId = this.getMapContainerId(coordKey);
                 const mapDiv = document.getElementById(mapContainerId);
                 if (!mapDiv) {
-                    console.error(`Missing map elements for ${mapContainerId}`);
-                    return;
+                    throw this.createError(`Missing map elements for ${mapContainerId}`);
                 }
 
                 const mapWidth = right - left;
@@ -140,10 +332,18 @@ export class LeafletMessageBrowserIframe {
                 // Check if map size changed
                 const mapData = this.mapData;
                 const prev = mapData.get(coordKey);
-                const hasSizeChanged = !prev || prev.mapWidth !== mapWidth || prev.mapHeight !== mapHeight;
+                if (prev === undefined) {
+                    mapData.set(coordKey, new MapData({mapWidth, mapHeight}, mapContainer));
+                }
+                const hasSizeChanged = !prev || prev.mapSize.mapWidth !== mapWidth || prev.mapSize.mapHeight !== mapHeight;
 
+                const curr = mapData.get(coordKey);
+                if (curr === undefined) {
+                    throw this.createError(`Missing map data for ${coordKey}`);
+                }
+                curr.leafletBoxBounds = mapContainer;
                 if (hasSizeChanged) {
-                    mapData.set(coordKey, {mapWidth, mapHeight});
+                    curr.mapSize = {mapWidth, mapHeight};
                     const leafletMapId = this.getLeafletMapId(coordKey);
                     this.leafletWebGl2Map.resizeMap(leafletMapId);
                 }
@@ -154,7 +354,7 @@ export class LeafletMessageBrowserIframe {
                 }
             }
         } catch (err) {
-            console.error("Failed to parse or apply leafletBoxes data", err)
+            throw this.createError("Failed to parse or apply leafletBoxes data", false, err);
         }
     }
 
@@ -227,5 +427,9 @@ export class LeafletMessageBrowserIframe {
             iframe.contentWindow.postMessage("getLeafletBoxes", "*");
         }
         this.animationFrameId = requestAnimationFrame(this.requestLeafletBoxes.bind(this));
+    }
+
+    private createError(msg: string, doConsoleLog: boolean = true, baseError?: unknown): Error {
+        return createError("LeafletMessageBrowserIframe", msg, doConsoleLog, baseError);
     }
 }
