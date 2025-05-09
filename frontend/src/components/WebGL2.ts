@@ -296,18 +296,18 @@ class TextureArrayMipmapArray implements TextureLevelMipmapArray {
     }
 }
 
-type SeedDataLayerKey = string & { __brand: "SeedDataLayerKey" };
+type MapDataLayerKey = string & { __brand: "MapDataLayerKey" };
 
 // TODO: should this struct-like class be an interface?
-class SeedDataLayer {
-    public seed: string;
+class MapDataLayer {
+    public uploadUuid: string;
     public dataImageType: DataImageType;
-    constructor(seed: string, dataImageType: DataImageType) {
-        this.seed = seed;
+    constructor(uploadUuid: string, dataImageType: DataImageType) {
+        this.uploadUuid = uploadUuid;
         this.dataImageType = dataImageType;
     }
-    toKey(): SeedDataLayerKey {
-        return `${this.seed}::${this.dataImageType}` as SeedDataLayerKey;
+    toKey(): MapDataLayerKey {
+        return `${this.uploadUuid}::${this.dataImageType}` as MapDataLayerKey;
     }
 }
 
@@ -323,7 +323,7 @@ export default class WebGL2CanvasManager {
     private readonly NATURAL_TILES_TEXTURE_SIZE : number;
     private readonly RESOLUTION_LOCATION_NAME : string;
     private readonly MAX_TEXTURE_SLOTS: number;
-    private readonly textureLRU: Map<SeedDataLayerKey,number>; // seed and r ➜ slot index
+    private readonly textureLRU: Map<MapDataLayerKey,number>; // map data image layer ➜ slot index
     private readonly worldDataArray: WebGLTexture;
     private readonly worldDataArrayNumMipmaps: number; // TODO: is this necessary?
     private elementDataTextureArray: WebGLTexture | undefined;
@@ -333,8 +333,8 @@ export default class WebGL2CanvasManager {
     private readonly WORLD_DATA_TEXTURE_HEIGHT: number;
     private readonly clearFrameBuffer: WebGLFramebuffer;
     private numProvidedNaturalTileMipmaps : number | null;
-    private readonly isSeedRenderLayerReady: Map<SeedDataLayerKey, boolean>;
-    private readonly dataImageSlotMap: Map<SeedDataLayerKey, number>;
+    private readonly isMapDataImageLayerReady: Map<MapDataLayerKey, boolean>;
+    private readonly dataImageSlotMap: Map<MapDataLayerKey, number>;
     private isReadyToRender: boolean;
     private readonly EXPLICIT_UNINITIALIZED_COLOR: ReadonlyArray<number>;
     private readonly EXPLICIT_OUT_OF_BOUNDS_COLOR: ReadonlyArray<number>;
@@ -371,7 +371,7 @@ export default class WebGL2CanvasManager {
 
         this.numProvidedNaturalTileMipmaps = null;
 
-        this.isSeedRenderLayerReady = new Map();
+        this.isMapDataImageLayerReady = new Map();
         this.dataImageSlotMap = new Map();
         this.isReadyToRender = false;
 
@@ -422,7 +422,7 @@ export default class WebGL2CanvasManager {
             elementDataImage?: string | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
             bgImages?: readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
             tileImages?: readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
-            seed?: string
+            uploadUuid?: string
         }
     ) : Promise<void> {
         // TODO: lazy texture loading with large images
@@ -442,18 +442,17 @@ export default class WebGL2CanvasManager {
             const tileImages = opts.tileImages;
 
             if (dataImages) {
-                const seed = opts.seed;
-                if (seed === undefined) throw this.createError("Seed is required for data images.");
+                const uploadUuid = opts.uploadUuid;
+                if (uploadUuid === undefined) throw this.createError("uploadUuid is required for data images.");
 
                 // TODO: change this to take arbitrary (including noncontiguous) layer offsets
                 const worldDataPromises = Array.from(dataImages.entries()).map(async ([renderLayer, imageArray]) => {
                     const normalized = await this.normalizeImageInputArray(imageArray);
                     const wrapper = new TextureArray(normalized);
-                    const slotMap = this.acquireTextureSlots(seed, renderLayer);
+                    const slotMap = this.acquireTextureSlots(uploadUuid, renderLayer);
                     for (const [slot, layer] of slotMap) {
-                        // TODO: don't use seeds as unique keys, use UUIDs or similar to account for seed versions, multiple uploads, etc.
                         this.uploadTextureArray(this.worldDataArray, wrapper, true, false, this.worldDataArrayNumMipmaps, slot, this.EXPLICIT_OUT_OF_BOUNDS_COLOR);
-                        this.isSeedRenderLayerReady.set(new SeedDataLayer(seed, layer).toKey(), true);
+                        this.isMapDataImageLayerReady.set(new MapDataLayer(uploadUuid, layer).toKey(), true);
                     }
                 });
 
@@ -517,7 +516,7 @@ export default class WebGL2CanvasManager {
         this.checkWebGLError();
     }
     render(
-        seed: string,
+        uploadUuid: string,
         numCellsWorldWidth: number,
         numCellsWorldHeight: number,
         num_cells_width: number,
@@ -533,23 +532,17 @@ export default class WebGL2CanvasManager {
         if (!this.isReadyToRender) {
             throw this.createError("Base textures not yet fully loaded. Do not call render(...) at this time, wait for setup(...) to finish.");
         }
-        /*
-        if (this.isSeedRenderLayerReady.get(new SeedDataLayer(seed, renderLayer)) === false) {
-            throw this.createError("Seed layer data image not yet fully loaded. Do not call render(...) at this time, wait for setup(...) to finish.");
-        }
-        TODO: remove
-         */
-        if (this.queryIsSeedRenderLayerReady(seed, renderLayer) === false) {
-            throw this.createError("Seed layer data image not yet fully loaded. Do not call render(...) at this time, wait for setup(...) to finish.");
+        if (this.queryIsMapDataImageLayerReady(uploadUuid, renderLayer) === false) {
+            throw this.createError("Map data layer data image not yet fully loaded. Do not call render(...) at this time, wait for setup(...) to finish.");
         }
 
         this.resizeCanvas(canvas_width, canvas_height);
         this.resetCanvasState();
 
-        // Set the currently rendering seed
-        const slots = this.queryTextureSlots(seed, renderLayer);
+        // Set the currently rendering uploadUuid
+        const slots = this.queryTextureSlots(uploadUuid, renderLayer);
         if (slots.length > this.WORLD_SLOTS_CAPACITY) {
-            throw this.createError(`Too many texture slots for seed: ${seed}`);
+            throw this.createError(`Too many texture slots for uploadUuid: ${uploadUuid}`);
         }
         // Pad the slots to the maximum capacity
         const paddedSlots = new Array(this.WORLD_SLOTS_CAPACITY).fill(-1); // TODO: show error texture in shader if uninitialized value called
@@ -557,7 +550,7 @@ export default class WebGL2CanvasManager {
             paddedSlots[i] = slots[i];
         }
         const slotArray: ReadonlyArray<[number]> = paddedSlots.map((slot) => [slot]);
-        if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Rendering with slots: ${JSON.stringify(slotArray)} seed ${seed} layer ${renderLayer} list ${JSON.stringify(getDataImageType(renderLayer))}`);
+        if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Rendering with slots: ${JSON.stringify(slotArray)} uploadUuid ${uploadUuid} layer ${renderLayer} list ${JSON.stringify(getDataImageType(renderLayer))}`);
         this.bind1UniformIntVectorToUnit(slotArray, "u_world_slots");
 
         // Set the currently rendering layer
@@ -917,6 +910,7 @@ void main() {
 
     // Get the world texture size dynamically
     ivec2 paddedWorldSize = textureSize(u_world_data_image_array, 0).xy; // Get world texture resolution
+    int worldDataDepth = textureSize(u_world_data_image_array, 0).z; // Get world texture depth
     // e.g. (1200, 500)
     // world size is different, e.g. (636, 404)
         
@@ -935,7 +929,7 @@ void main() {
             } else {
                 // Look up a color from the texture.
                 int slot_idx = u_world_slots[0]; // u_world_slots[0] = elementIdx8
-                if (slot_idx < 0 || slot_idx >= 5) {
+                if (slot_idx < 0 || slot_idx >= worldDataDepth) {
                     // Invalid slot index, use the error texture
                     ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
                     outColor = get_error_texture_color(cell_pos);
@@ -1011,7 +1005,7 @@ void main() {
             
             uint element_idx = 255u; // default value that should never be used
             int slot_idx = u_world_slots[0]; // u_world_slots[0] = elementIdx8
-            if (slot_idx < 0 || slot_idx >= 5) {
+            if (slot_idx < 0 || slot_idx >= worldDataDepth) {
                 // Invalid slot index, use the error texture
                 ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
                 outColor = get_error_texture_color(cell_pos);
@@ -1064,7 +1058,7 @@ void main() {
                 temperature = 0.0;
             } else {
                 int slot_idx = u_world_slots[0]; // u_world_slots[0] = temperature32
-                if (slot_idx < 0 || slot_idx >= 5) {
+                if (slot_idx < 0 || slot_idx >= worldDataDepth) {
                     // Invalid slot index, use the error texture
                     ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
                     outColor = get_error_texture_color(cell_pos);
@@ -1109,7 +1103,7 @@ void main() {
                 mass = 0.0;
             } else {
                 int slot_idx = u_world_slots[0]; // u_world_slots[0] = mass32
-                if (slot_idx < 0 || slot_idx >= 5) {
+                if (slot_idx < 0 || slot_idx >= worldDataDepth) {
                     // Invalid slot index, use the error texture
                     ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
                     outColor = get_error_texture_color(cell_pos);
@@ -1185,8 +1179,8 @@ void main() {
     }
 
     // Used by external code to check if the canvas is ready to render
-    public getIsReadyToRender(seed: string, renderLayer: RenderLayer): boolean {
-        return this.queryIsSeedRenderLayerReady(seed, renderLayer);
+    public getIsReadyToRender(uploadUuid: string, renderLayer: RenderLayer): boolean {
+        return this.queryIsMapDataImageLayerReady(uploadUuid, renderLayer);
     }
 
     resetCanvasState() : void {
@@ -1242,25 +1236,25 @@ void main() {
         return createError("WebGL2CanvasManager", msg, doConsoleLog, baseError);
     }
 
-    // NOTE: this assumes that the texture will be uploaded to WebGL2 before the next queryTextureSlots or queryIsSeedRenderLayerReady call
-    // TODO: encapsulate textureLRU, dataImageSlotMap, MAX_TEXTURE_SLOTS, SeedDataLayer, and associated functions in a separate class, and combine maps into one
-    private acquireTextureSlots(seed: string, renderLayer: RenderLayer): Map<number, DataImageType> {
+    // NOTE: this assumes that the texture will be uploaded to WebGL2 before the next queryTextureSlots or queryIsMapDataImageLayerReady call
+    // TODO: encapsulate textureLRU, dataImageSlotMap, MAX_TEXTURE_SLOTS, MapDataLayer, and associated functions in a separate class, and combine maps into one
+    private acquireTextureSlots(uploadUuid: string, renderLayer: RenderLayer): Map<number, DataImageType> {
         const dataImageTypeList = getDataImageType(renderLayer);
         const ans = new Map<number, DataImageType>();
         for (const dataImageType of dataImageTypeList) {
-            const currSeedLayerKey = new SeedDataLayer(seed, dataImageType).toKey();
+            const currUploadUuidLayerKey = new MapDataLayer(uploadUuid, dataImageType).toKey();
             let acquiredIdx = -1;
             {
-                if (this.textureLRU.has(currSeedLayerKey)) {
+                if (this.textureLRU.has(currUploadUuidLayerKey)) {
                     // Check if the texture is already in the LRU cache
-                    this.textureLRU.set(currSeedLayerKey, performance.now());
-                    const slot = this.dataImageSlotMap.get(currSeedLayerKey);
+                    this.textureLRU.set(currUploadUuidLayerKey, performance.now());
+                    const slot = this.dataImageSlotMap.get(currUploadUuidLayerKey);
                     if (slot === undefined || slot === null || slot === -1) {
-                        throw this.createError(`Mismatch between dataImageSlotMap and textureLRU - failed to get slot for ${currSeedLayerKey}`);
+                        throw this.createError(`Mismatch between dataImageSlotMap and textureLRU - failed to get slot for ${currUploadUuidLayerKey}`);
                     }
                     acquiredIdx = slot;
-                    this.dataImageSlotMap.set(currSeedLayerKey, acquiredIdx);
-                    if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Texture ${currSeedLayerKey} already in LRU cache, acquired existing index ${acquiredIdx}`);
+                    this.dataImageSlotMap.set(currUploadUuidLayerKey, acquiredIdx);
+                    if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Texture ${currUploadUuidLayerKey} already in LRU cache, acquired existing index ${acquiredIdx}`);
                 } else if (this.textureLRU.size >= this.MAX_TEXTURE_SLOTS) {
                     // Check if we need to evict a texture
 
@@ -1269,24 +1263,24 @@ void main() {
                         .sort((a, b) => a[1] - b[1])[0][0];
                     const slot = this.dataImageSlotMap.get(eldest);
                     if (slot === undefined || slot === null || slot === -1) {
-                        throw this.createError(`Mismatch between dataImageSlotMap and textureLRU - failed to get slot for ${currSeedLayerKey}`);
+                        throw this.createError(`Mismatch between dataImageSlotMap and textureLRU - failed to get slot for ${currUploadUuidLayerKey}`);
                     }
                     this.textureLRU.delete(eldest);
                     this.dataImageSlotMap.set(eldest, -1); // free slot
-                    this.isSeedRenderLayerReady.set(eldest, false); // free slot
+                    this.isMapDataImageLayerReady.set(eldest, false); // free slot
                     // caller must re-upload into idx
                     acquiredIdx = slot;
-                    this.textureLRU.set(currSeedLayerKey, performance.now());
-                    this.dataImageSlotMap.set(currSeedLayerKey, acquiredIdx);
-                    if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Evicted texture ${eldest} from LRU cache, acquired new texture ${currSeedLayerKey} at index ${acquiredIdx}`);
+                    this.textureLRU.set(currUploadUuidLayerKey, performance.now());
+                    this.dataImageSlotMap.set(currUploadUuidLayerKey, acquiredIdx);
+                    if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Evicted texture ${eldest} from LRU cache, acquired new texture ${currUploadUuidLayerKey} at index ${acquiredIdx}`);
                 } else {
                     // Check if we have a free slot
 
                     // free slot = size
                     acquiredIdx = this.textureLRU.size;
-                    this.textureLRU.set(currSeedLayerKey, performance.now());
-                    this.dataImageSlotMap.set(currSeedLayerKey, acquiredIdx);
-                    if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Acquired new texture ${currSeedLayerKey} at index ${acquiredIdx}`);
+                    this.textureLRU.set(currUploadUuidLayerKey, performance.now());
+                    this.dataImageSlotMap.set(currUploadUuidLayerKey, acquiredIdx);
+                    if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Acquired new texture ${currUploadUuidLayerKey} at index ${acquiredIdx}`);
                 }
                 if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`textureLRU and dataImageSlotMap status:`, this.textureLRU, this.dataImageSlotMap);
             }
@@ -1297,25 +1291,25 @@ void main() {
         return ans;
     }
 
-    private queryIsSeedRenderLayerReady(seed: string, renderLayer: RenderLayer): boolean {
+    private queryIsMapDataImageLayerReady(uploadUuid: string, renderLayer: RenderLayer): boolean {
         const dataImageTypeList = getDataImageType(renderLayer);
         for (const dataImageType of dataImageTypeList) {
-            if (!this.isSeedRenderLayerReady.has(new SeedDataLayer(seed, dataImageType).toKey()) || this.isSeedRenderLayerReady.get(new SeedDataLayer(seed, dataImageType).toKey()) === false) {
-                // NOTE: This should be the same as checking this.dataImageSlotMap.has([seed, dataImageType]) || this.dataImageSlotMap.get([seed, dataImageType]) !== -1
+            if (!this.isMapDataImageLayerReady.has(new MapDataLayer(uploadUuid, dataImageType).toKey()) || this.isMapDataImageLayerReady.get(new MapDataLayer(uploadUuid, dataImageType).toKey()) === false) {
+                // NOTE: This should be the same as checking this.dataImageSlotMap.has([uploadUuid, dataImageType]) || this.dataImageSlotMap.get([uploadUuid, dataImageType]) !== -1
                 return false;
             }
         }
         return true;
     }
 
-    private queryTextureSlots(seed: string, renderLayer: RenderLayer): readonly number[] {
+    private queryTextureSlots(uploadUuid: string, renderLayer: RenderLayer): readonly number[] {
         const dataImageTypeList = getDataImageType(renderLayer);
         const ans: number[] = [];
         for (const dataImageType of dataImageTypeList) {
-            const currSeedLayerKey = new SeedDataLayer(seed, dataImageType).toKey();
-            const slot = this.dataImageSlotMap.get(currSeedLayerKey);
+            const currUploadUuidLayerKey = new MapDataLayer(uploadUuid, dataImageType).toKey();
+            const slot = this.dataImageSlotMap.get(currUploadUuidLayerKey);
             if (slot === undefined || slot === null || slot === -1) {
-                throw this.createError(`Failed to get texture slot for ${currSeedLayerKey}`);
+                throw this.createError(`Failed to get texture slot for ${currUploadUuidLayerKey}`);
             }
             ans.push(slot);
         }

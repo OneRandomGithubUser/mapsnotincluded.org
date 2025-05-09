@@ -79,10 +79,10 @@ export interface IWebGL2AsyncManager {
         elementDataImage?: string | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
         bgImages?: readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
         tileImages?: readonly string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
-        seed?: string
+        uploadUuid?: string
     }): Promise<void>;
     render(
-        seed: string,
+        uploadUuid: string,
         numCellsWorldWidth: number,
         numCellsWorldHeight: number,
         num_cells_width: number,
@@ -93,7 +93,7 @@ export interface IWebGL2AsyncManager {
         canvas_height: number,
         renderLayer: RenderLayer
     ): Promise<void>; // TODO: use a more specific type as defined in WebGL2CanvasManager
-    getIsReadyToRender(seed: string, renderLayer: RenderLayer): Promise<boolean>;
+    getIsReadyToRender(uploadUuid: string, renderLayer: RenderLayer): Promise<boolean>;
     clearCanvas(): Promise<void>;
     copyImageBlob(options?: ImageEncodeOptions): Promise<Blob>;
     transferImageBitmap(): Promise<ImageBitmap>;
@@ -148,14 +148,14 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
                     elementDataImage?: string | HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap,
                     bgImages?: string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
                     tileImages?: string[] | readonly HTMLImageElement[] | readonly HTMLCanvasElement[] | readonly OffscreenCanvas[] | readonly ImageBitmap[],
-                    seed?: string
+                    uploadUuid?: string
                 }
     ): Promise<void> {
         await this.runSequence([{ type: "setup", args: [opts] }]);
     }
 
     async render(
-        seed: string,
+        uploadUuid: string,
         worldWidth: number,
         worldHeight: number,
         width: number,
@@ -169,7 +169,7 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
         await this.runSequence([
             {
                 type: "render",
-                args: [seed, worldWidth, worldHeight, width, height, xOffset, yOffset, canvasWidth, canvasHeight, layerIndex],
+                args: [uploadUuid, worldWidth, worldHeight, width, height, xOffset, yOffset, canvasWidth, canvasHeight, layerIndex],
             },
         ]);
     }
@@ -179,7 +179,7 @@ export default class WebGL2Proxy implements IWebGL2AsyncManager {
      * @param renderLayer The layer to check.
      * @returns A promise that resolves to a boolean indicating if the context is ready to render.
      */
-    async getIsReadyToRender(seed: string, renderLayer: RenderLayer): Promise<boolean> {
+    async getIsReadyToRender(uploadUuid: string, renderLayer: RenderLayer): Promise<boolean> {
         const results = await this.runSequence([
             { type: "getIsReadyToRender", args: [renderLayer] }
         ]);

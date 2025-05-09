@@ -401,9 +401,9 @@ export class LeafletWebGL2Map {
         // This layer already set up?
         if (existingPromise === null) {
             // This layer hasn't been evicted by the LRU cache?
-            const canvasManagerIsReadyArr = await this.webGLCanvasRef.value!.sequence().getIsReadyToRender(seed, renderLayer).exec(); // TODO: await needed?
+            const canvasManagerIsReadyArr = await this.webGLCanvasRef.value!.sequence().getIsReadyToRender(uploadUuid, renderLayer).exec(); // TODO: await needed?
             const canvasManagerIsReady = !canvasManagerIsReadyArr.includes(false);
-            if (canvasManagerIsReady) console.log(`Canvas manager is already ready for seed=${seed} in setupLeafletMap()`);
+            if (canvasManagerIsReady) console.log(`Canvas manager is already ready for uploadUuid=${uploadUuid} in setupLeafletMap()`);
             if (canvasManagerIsReady) {
                 return;
             }
@@ -429,12 +429,12 @@ export class LeafletWebGL2Map {
             */
             // Make sure canvas manager agrees with local state before starting
             // Until the TO DO is done, this will account for multiple layers being setup by the same data images
-            const canvasManagerIsReadyArr = await this.webGLCanvasRef.value!.sequence().getIsReadyToRender(seed, renderLayer).exec();
+            const canvasManagerIsReadyArr = await this.webGLCanvasRef.value!.sequence().getIsReadyToRender(uploadUuid, renderLayer).exec();
             const canvasManagerIsReady = !canvasManagerIsReadyArr.includes(false);
             if (canvasManagerIsReady) {
                 // TODO: should this throw an error? or return? No need to reupload images if still cached in the canvas manager
 
-                const msg = `Tried to double set up a currently ready canvas manager for seed=${seed} in setupLeafletMap()`;
+                const msg = `Tried to double set up a currently ready canvas manager for uploadUuid=${uploadUuid} in setupLeafletMap()`;
                 console.warn(msg);
                 // throw this.createError(msg, true);
 
@@ -503,7 +503,7 @@ export class LeafletWebGL2Map {
                     default:
                         throw this.createError(`Unknown render layer ${renderLayer} in setupLeafletMap()`);
                 }
-                await this.webGLCanvasRef.value!.sequence().setup({ dataImages: bitmapMap, seed }).exec();
+                await this.webGLCanvasRef.value!.sequence().setup({ dataImages: bitmapMap, uploadUuid }).exec();
             } catch (err: unknown) {
                 const msg = `WebGL setup failed for seed=${seed} in setupLeafletMap()`;
                 throw this.createError(msg, true, err);
@@ -618,8 +618,8 @@ export class LeafletWebGL2Map {
 
     public initializeMap(leafletDomId: string, seed: string, uploadUuid: UploadUuid, dataImageBaseUrl: Url): L.Map {
         // TODO: activeSeedsRef
-        if (this.mapData.has(seed)) {
-            return this.mapData.get(seed)!.getMap();
+        if (this.mapData.has(uploadUuid)) {
+            return this.mapData.get(uploadUuid)!.getMap();
         }
         const MapsNotIncludedCRS: L.CRS = L.extend({}, L.CRS.Simple, {
             distance: (latlng1: L.LatLngExpression, latlng2: L.LatLngExpression): number => {
@@ -794,7 +794,7 @@ export class LeafletWebGL2Map {
                         try {
                             const [_, bmp] = await this._mni_leafletWebGL2Map.webGLCanvasRef.value!.sequence()
                                 .render(
-                                    seed,
+                                    uploadUuid,
                                     numCellsWorldWidth,
                                     numCellsWorldHeight,
                                     xyScale, xyScale,
