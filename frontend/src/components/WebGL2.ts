@@ -312,6 +312,8 @@ class SeedDataLayer {
 }
 
 export default class WebGL2CanvasManager {
+    private readonly DEBUG_DO_LRU_CACHE_LOG: boolean = false;
+
     private canvas: OffscreenCanvas;
     private readonly gl: WebGL2RenderingContext;
     private readonly program: WebGLProgram;
@@ -336,6 +338,7 @@ export default class WebGL2CanvasManager {
     private isReadyToRender: boolean;
     private readonly EXPLICIT_UNINITIALIZED_COLOR: ReadonlyArray<number>;
     private readonly EXPLICIT_OUT_OF_BOUNDS_COLOR: ReadonlyArray<number>;
+    private readonly WORLD_SLOTS_CAPACITY = 5;
     constructor(defaultWidth: number = 300, defaultHeight: number = 300) {
         // Get a WebGL context
         this.canvas = new OffscreenCanvas(defaultWidth, defaultHeight);
@@ -545,11 +548,17 @@ export default class WebGL2CanvasManager {
 
         // Set the currently rendering seed
         const slots = this.queryTextureSlots(seed, renderLayer);
-        if (slots.length > 5) {
+        if (slots.length > this.WORLD_SLOTS_CAPACITY) {
             throw this.createError(`Too many texture slots for seed: ${seed}`);
         }
-        const slotArray: ReadonlyArray<[number]> = slots.map((slot) => [slot]);
-        this.bind1UniformIntVectorToUnit(slotArray, "u_worldSlots");
+        // Pad the slots to the maximum capacity
+        const paddedSlots = new Array(this.WORLD_SLOTS_CAPACITY).fill(-1); // TODO: show error texture in shader if uninitialized value called
+        for (let i = 0; i < slots.length; i++) {
+            paddedSlots[i] = slots[i];
+        }
+        const slotArray: ReadonlyArray<[number]> = paddedSlots.map((slot) => [slot]);
+        if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Rendering with slots: ${JSON.stringify(slotArray)} seed ${seed} layer ${renderLayer} list ${JSON.stringify(getDataImageType(renderLayer))}`);
+        this.bind1UniformIntVectorToUnit(slotArray, "u_world_slots");
 
         // Set the currently rendering layer
         let layer: number;
@@ -738,7 +747,7 @@ uniform sampler2DArray u_space_image_array;
 uniform float u_lod_level;
 uniform vec2 u_natural_texture_tiles_per_cell;
 uniform bool u_rendering_background;
-uniform int u_worldSlots[5]; // which slots to sample
+uniform int u_world_slots[5]; // which slots to sample
 uniform int u_render_layer; // which layer to sample
 
 uniform float u_massControlValues[10];
@@ -749,6 +758,8 @@ uniform vec3 u_temperatureControlColors[10];
 
 const vec4 EXPLICIT_UNINITIALIZED_COLOR = vec4(0.0, 1.0, 1.0, 0.5);
 const vec4 EXPLICIT_OUT_OF_BOUNDS_COLOR = vec4(1.0, 0.0, 1.0, 0.5);
+
+bool DEBUG_DO_RENDER_RAW_DATA_IMAGE = false; // Not const to prevent unused variable discarding
 
 // the texCoords passed in from the vertex shader.
 in vec2 v_texCoord;
@@ -923,10 +934,19 @@ void main() {
                 outColor = space_background + space_foreground;
             } else {
                 // Look up a color from the texture.
+                int slot_idx = u_world_slots[0]; // u_world_slots[0] = elementIdx8
+                if (slot_idx < 0 || slot_idx >= 5) {
+                    // Invalid slot index, use the error texture
+                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                    outColor = get_error_texture_color(cell_pos);
+                    break;
+                }
                 vec4 elementIdxColorData = texture(u_world_data_image_array,
-                                 vec3(v_texCoord, float(u_worldSlots[0]))); // u_worldSlots[0] = elementIdx8
-                //outColor = elementIdxColorData;
-                //break;
+                                 vec3(v_texCoord, float(slot_idx)));
+                if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
+                    outColor = elementIdxColorData;
+                    break;
+                }
                 
                 uint element_idx = 255u; // default value that should never be used
                 
@@ -990,11 +1010,20 @@ void main() {
             // element overlay
             
             uint element_idx = 255u; // default value that should never be used
+            int slot_idx = u_world_slots[0]; // u_world_slots[0] = elementIdx8
+            if (slot_idx < 0 || slot_idx >= 5) {
+                // Invalid slot index, use the error texture
+                ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                outColor = get_error_texture_color(cell_pos);
+                break;
+            }
             // Look up a color from the texture.
             vec4 elementIdxColorData = texture(u_world_data_image_array,
-                             vec3(v_texCoord, float(u_worldSlots[0]))); // u_worldSlots[0] = elementIdx8
-            //outColor = elementIdxColorData;
-            //break;
+                             vec3(v_texCoord, float(slot_idx)));
+            if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
+                outColor = elementIdxColorData;
+                break;
+            }
             
             if (u_rendering_background) {
                 element_idx = 176u; // Assume the background is vacuum
@@ -1034,12 +1063,20 @@ void main() {
                 // Assume the background is vacuum
                 temperature = 0.0;
             } else {
-            
+                int slot_idx = u_world_slots[0]; // u_world_slots[0] = temperature32
+                if (slot_idx < 0 || slot_idx >= 5) {
+                    // Invalid slot index, use the error texture
+                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                    outColor = get_error_texture_color(cell_pos);
+                    break;
+                }
                 // Look up a color from the texture.
                 vec4 tempColorData = texture(u_world_data_image_array,
-                                 vec3(v_texCoord, float(u_worldSlots[0]))); // u_worldSlots[0] = temperature32
-                //outColor = tempColorData;
-                //break;
+                                 vec3(v_texCoord, float(slot_idx)));
+                if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
+                    outColor = tempColorData;
+                    break;
+                }
                                  
                 // Decode the 32-bit RGBA value to a 32-bit float
                 if (is_close_enough(tempColorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
@@ -1071,11 +1108,20 @@ void main() {
                 // Assume the background is vacuum
                 mass = 0.0;
             } else {
+                int slot_idx = u_world_slots[0]; // u_world_slots[0] = mass32
+                if (slot_idx < 0 || slot_idx >= 5) {
+                    // Invalid slot index, use the error texture
+                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                    outColor = get_error_texture_color(cell_pos);
+                    break;
+                }
                 // Look up a color from the texture.
                 vec4 massColorData = texture(u_world_data_image_array,
-                                 vec3(v_texCoord, float(u_worldSlots[0]))); // u_worldSlots[0] = mass32
-                //outColor = massColorData;
-                //break;
+                                 vec3(v_texCoord, float(slot_idx)));
+                if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
+                    outColor = massColorData;
+                    break;
+                }
                 
                 // Decode the 32-bit RGBA value to a 32-bit float
                 if (is_close_enough(massColorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
@@ -1197,42 +1243,56 @@ void main() {
     }
 
     // NOTE: this assumes that the texture will be uploaded to WebGL2 before the next queryTextureSlots or queryIsSeedRenderLayerReady call
-    // TODO: encapsulate textureLRU, dataImageSlotMap, MAX_TEXTURE_SLOTS, SeedDataLayer, and associated functions in a separate class
+    // TODO: encapsulate textureLRU, dataImageSlotMap, MAX_TEXTURE_SLOTS, SeedDataLayer, and associated functions in a separate class, and combine maps into one
     private acquireTextureSlots(seed: string, renderLayer: RenderLayer): Map<number, DataImageType> {
         const dataImageTypeList = getDataImageType(renderLayer);
         const ans = new Map<number, DataImageType>();
         for (const dataImageType of dataImageTypeList) {
-            let acquiredIdx: number = -1;
             const currSeedLayerKey = new SeedDataLayer(seed, dataImageType).toKey();
+            let acquiredIdx = -1;
             {
-                // Check if the texture is already in the LRU cache
                 if (this.textureLRU.has(currSeedLayerKey)) {
+                    // Check if the texture is already in the LRU cache
                     this.textureLRU.set(currSeedLayerKey, performance.now());
-                    const idx = [...this.textureLRU.keys()].indexOf(currSeedLayerKey);
-                    acquiredIdx = idx;
-                }
-                // Check if we need to evict a texture
-                if (this.textureLRU.size >= this.MAX_TEXTURE_SLOTS) {
+                    const slot = this.dataImageSlotMap.get(currSeedLayerKey);
+                    if (slot === undefined || slot === null || slot === -1) {
+                        throw this.createError(`Mismatch between dataImageSlotMap and textureLRU - failed to get slot for ${currSeedLayerKey}`);
+                    }
+                    acquiredIdx = slot;
+                    this.dataImageSlotMap.set(currSeedLayerKey, acquiredIdx);
+                    if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Texture ${currSeedLayerKey} already in LRU cache, acquired existing index ${acquiredIdx}`);
+                } else if (this.textureLRU.size >= this.MAX_TEXTURE_SLOTS) {
+                    // Check if we need to evict a texture
+
                     // evict eldest
                     const eldest = [...this.textureLRU.entries()]
                         .sort((a, b) => a[1] - b[1])[0][0];
-                    const idx = [...this.textureLRU.keys()].indexOf(eldest);
+                    const slot = this.dataImageSlotMap.get(eldest);
+                    if (slot === undefined || slot === null || slot === -1) {
+                        throw this.createError(`Mismatch between dataImageSlotMap and textureLRU - failed to get slot for ${currSeedLayerKey}`);
+                    }
                     this.textureLRU.delete(eldest);
                     this.dataImageSlotMap.set(eldest, -1); // free slot
+                    this.isSeedRenderLayerReady.set(eldest, false); // free slot
                     // caller must re-upload into idx
-                    acquiredIdx = idx;
+                    acquiredIdx = slot;
+                    this.textureLRU.set(currSeedLayerKey, performance.now());
+                    this.dataImageSlotMap.set(currSeedLayerKey, acquiredIdx);
+                    if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Evicted texture ${eldest} from LRU cache, acquired new texture ${currSeedLayerKey} at index ${acquiredIdx}`);
+                } else {
+                    // Check if we have a free slot
+
+                    // free slot = size
+                    acquiredIdx = this.textureLRU.size;
+                    this.textureLRU.set(currSeedLayerKey, performance.now());
+                    this.dataImageSlotMap.set(currSeedLayerKey, acquiredIdx);
+                    if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`Acquired new texture ${currSeedLayerKey} at index ${acquiredIdx}`);
                 }
-                // free slot = size
-                acquiredIdx = this.textureLRU.size;
-                this.textureLRU.set(currSeedLayerKey, performance.now());
+                if (this.DEBUG_DO_LRU_CACHE_LOG) console.log(`textureLRU and dataImageSlotMap status:`, this.textureLRU, this.dataImageSlotMap);
             }
 
             // update answer
             ans.set(acquiredIdx, dataImageType);
-
-            // update all seed layers that are now ready
-            // this.isSeedRenderLayerReady.set(new SeedDataLayer(seed, layer), true);
-            this.dataImageSlotMap.set(currSeedLayerKey, acquiredIdx);
         }
         return ans;
     }
@@ -1253,10 +1313,11 @@ void main() {
         const ans: number[] = [];
         for (const dataImageType of dataImageTypeList) {
             const currSeedLayerKey = new SeedDataLayer(seed, dataImageType).toKey();
-            if (this.textureLRU.has(currSeedLayerKey)) {
-                const idx = [...this.textureLRU.keys()].indexOf(currSeedLayerKey);
-                ans.push(idx);
+            const slot = this.dataImageSlotMap.get(currSeedLayerKey);
+            if (slot === undefined || slot === null || slot === -1) {
+                throw this.createError(`Failed to get texture slot for ${currSeedLayerKey}`);
             }
+            ans.push(slot);
         }
         return ans;
     }
