@@ -427,8 +427,11 @@ export class LeafletWebGL2Map {
             const canvasManagerIsReadyArr = await this.webGLCanvasRef.value!.sequence().getIsReadyToRender(seed, renderLayer).exec();
             const canvasManagerIsReady = !canvasManagerIsReadyArr.includes(false);
             if (canvasManagerIsReady) {
-                const msg = `Tried to double set up a currently ready canvas manager for seed=${seed} in setupLeafletMap()`;
-                throw this.createError(msg, true);
+                // TODO: should this throw an error? or return? No need to reupload images if still cached in the canvas manager
+
+                // const msg = `Tried to double set up a currently ready canvas manager for seed=${seed} in setupLeafletMap()`;
+                // throw this.createError(msg, true);
+
                 // leafletMapData.clearSetupPromise(renderLayer);
                 // return;
             }
