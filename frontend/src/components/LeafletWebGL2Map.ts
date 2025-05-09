@@ -17,13 +17,16 @@ import "leaflet-gesture-handling/dist/leaflet-gesture-handling.css";
 import {createError} from "@/components/CreateCascadingError";
 import {LeafletExpandedScaleControl} from "@/components/LeafletExpandedScaleControl";
 import {LeafletLayerToggleControl} from "@/components/LeafletLayerToggleControl";
-import {b} from "vite/dist/node/types.d-aGj9QkWt";
 
 interface TileCoords {
     x: number;
     y: number;
     z: number;
 }
+
+type UploadUuid = string
+
+type Url = string
 
 class LeafletMapData {
     private map: L.Map;
@@ -106,7 +109,7 @@ export class LeafletWebGL2Map {
     private readonly MAX_LOSSLESS_MAP_UNITS_PER_CELL = 128; // Maximum size per cell
     private readonly MAX_LOSSLESS_ZOOM = this.get_zoom_from_map_units_per_cell(this.MAX_LOSSLESS_MAP_UNITS_PER_CELL); // Maximum zoom level for lossless tiles
 
-    private readonly mapData: Map<string, LeafletMapData> = new Map();
+    private readonly mapData: Map<UploadUuid, LeafletMapData> = new Map();
     private readonly webGLCanvasRef: Ref<WebGL2Proxy | null> = ref(null);
     private readonly webGLInitPromiseRef: Ref<Promise<void> | null> = ref(null);
 
@@ -344,49 +347,50 @@ export class LeafletWebGL2Map {
         return Math.log2(size);
     }
 
-    public resizeMap(htmlId: string): void {
-        if (!this.mapData.has(htmlId)) {
-            const msg = `Map container with htmlId ${htmlId} not found.`;
-            throw this.createError(`Map container with htmlId ${htmlId} not found.`, true);
+    public resizeMap(uploadUuid: UploadUuid): void {
+        if (!this.mapData.has(uploadUuid)) {
+            const msg = `Map container with uploadUuid ${uploadUuid} not found.`;
+            throw this.createError(`Map container with uploadUuid ${uploadUuid} not found.`, true);
         }
-        const mapInstance = this.mapData.get(htmlId)!.getMap();
+        const mapInstance = this.mapData.get(uploadUuid)!.getMap();
         mapInstance.invalidateSize();
     }
-    public removeMap(htmlId: string): void {
-        const mapData = this.mapData.get(htmlId);
+    public removeMap(uploadUuid: UploadUuid): void {
+        const mapData = this.mapData.get(uploadUuid);
         if (mapData === undefined) {
-            const msg = `Map container with htmlId ${htmlId} not found. Only call removeMap() for cleanup.`;
+            const msg = `Map container with uploadUuid ${uploadUuid} not found. Only call removeMap() for cleanup.`;
             throw this.createError(msg, true);
         }
         const mapInstance = mapData.getMap();
         mapInstance.off();
         const deletedMapInstance = mapInstance.remove();
         mapData.setMap(deletedMapInstance);
-        this.mapData.delete(htmlId);
+        this.mapData.delete(uploadUuid);
     }
     public removeAllMaps(): void {
-        for (const [htmlId, mapData] of this.mapData.entries()) {
+        for (const [uploadUuid, mapData] of this.mapData.entries()) {
             const mapInstance = mapData.getMap();
             mapInstance.off();
             const deletedMapInstance = mapInstance.remove();
             mapData.setMap(deletedMapInstance);
-            // this.mapData.delete(htmlId); // TODO: fix
+            // this.mapData.delete(uploadUuid); // TODO: fix
         }
-        for (const [htmlId, mapData] of this.mapData.entries()) {
+        for (const [uploadUuid, mapData] of this.mapData.entries()) {
             console.log("Removing mapData.getMap()", mapData.getMap());
-            this.mapData.delete(htmlId);
+            this.mapData.delete(uploadUuid);
         }
     }
 
     private async setupLeafletMap(
         leafletMap: L.Map,
         seed: string,
-        htmlId: string,
+        uploadUuid: UploadUuid,
+        dataImageBaseUrl: Url,
         renderLayer: RenderLayer
     ): Promise<void> {
-        const leafletMapData = this.mapData.get(htmlId);
+        const leafletMapData = this.mapData.get(uploadUuid);
         if (!leafletMapData) {
-            throw this.createError(`Map container with htmlId ${htmlId} not found.`);
+            throw this.createError(`Map container with uploadUuid ${uploadUuid} not found.`);
         }
         // NOTE: this assumes that, if a layer is set up, the map (but not necessarily other layers) is also set up
 
@@ -430,7 +434,7 @@ export class LeafletWebGL2Map {
             }
 
 
-            const base = `/world_data/${seed}`;
+            const base = `/world_data/${dataImageBaseUrl}`;
             const urls: string[] = [];
             // TODO: image versioning
             switch (renderLayer) {
@@ -603,7 +607,7 @@ export class LeafletWebGL2Map {
         }
     }
 
-    public initializeMap(htmlId: string, seed: string): L.Map {
+    public initializeMap(leafletDomId: string, seed: string, uploadUuid: UploadUuid, dataImageBaseUrl: Url): L.Map {
         // TODO: activeSeedsRef
         if (this.mapData.has(seed)) {
             return this.mapData.get(seed)!.getMap();
@@ -622,9 +626,9 @@ export class LeafletWebGL2Map {
             }
         });
 
-        const mapElement = document.getElementById(htmlId);
+        const mapElement = document.getElementById(leafletDomId);
         if (!mapElement) {
-            const msg = `Map container with htmlId ${htmlId} not found.`;
+            const msg = `Map container with leafletDomId ${leafletDomId} not found.`;
             throw this.createError(msg, true); //
         }
         const LEAFLET_MAP_MIN_ZOOM = -100; // -5;
@@ -635,7 +639,6 @@ export class LeafletWebGL2Map {
             minZoom: LEAFLET_MAP_MIN_ZOOM,
             maxZoom: LEAFLET_MAP_MAX_ZOOM,
             zoomSnap: 0,
-            interactive: false,
             fullscreenControl: true,
             gestureHandling: false // NOTE: do not set this to true! https://github.com/elmarquis/Leaflet.GestureHandling/issues/31#issuecomment-520782104
         }).setView([0, 0], 4);
@@ -645,8 +648,7 @@ export class LeafletWebGL2Map {
         const gestureHandler = (leafletMap as any).gestureHandling;
         (leafletMap as any).gestureHandling.enable();
 
-        // Add hint to use fullscreen to not have to use ctrl+zoom
-        leafletMap.whenReady(() => {
+        const addFullscreenHintText = (leafletMap: L.Map) => {
             const container = leafletMap.getContainer();
 
             // Get existing i18n scroll message set by Leaflet.GestureHandling
@@ -654,9 +656,14 @@ export class LeafletWebGL2Map {
             const originalTouchMsg = container.getAttribute("data-gesture-handling-touch-content") ?? "";
 
             // Append custom note (add spacing or separator as needed)
-            const customNote = " - or enter fullscreen";
+            const customNote = " - or enter fullscreen"; // TODO: readd this when entering and exiting fullscreen
             container.setAttribute("data-gesture-handling-scroll-content", originalScrollMsg + customNote);
             container.setAttribute("data-gesture-handling-touch-content", originalTouchMsg + customNote);
+        }
+
+        // Add hint to use fullscreen to not have to use ctrl+zoom
+        leafletMap.whenReady(() => {
+            addFullscreenHintText(leafletMap);
         });
 
         // disable Leaflet.GestureHandling when in fullscreen
@@ -668,6 +675,7 @@ export class LeafletWebGL2Map {
         leafletMap.on('exitFullscreen', () => {
             gestureHandler.enable();
             mapElement.style.pointerEvents = "none";
+            addFullscreenHintText(leafletMap);
         });
 
         const PlaceholderLayer = L.TileLayer.extend({
@@ -754,8 +762,8 @@ export class LeafletWebGL2Map {
                         return tileWrapper;
                     }
 
-                    this._mni_leafletWebGL2Map.initializeWebGL().then(async () => this._mni_leafletWebGL2Map.setupLeafletMap(leafletMap, seed, htmlId, this._mni_renderLayer).then(async () => {
-                        const leafletMapData = this._mni_leafletWebGL2Map.mapData.get(htmlId);
+                    this._mni_leafletWebGL2Map.initializeWebGL().then(async () => this._mni_leafletWebGL2Map.setupLeafletMap(leafletMap, seed, uploadUuid, dataImageBaseUrl, this._mni_renderLayer).then(async () => {
+                        const leafletMapData = this._mni_leafletWebGL2Map.mapData.get(uploadUuid);
                         const numCellsWorldWidth = leafletMapData.getNumCellsWorldWidth();
                         if (numCellsWorldWidth === null) {
                             const msg = `numCellsWorldWidth is null for seed=${seed} in createTile(). Please initialize it before retrieving it.`;
@@ -890,7 +898,7 @@ export class LeafletWebGL2Map {
         leafletExpandedScaleControl.addTo(leafletMap);
 
         // insert newly made map into maps
-        this.mapData.set(htmlId, new LeafletMapData(leafletMap));
+        this.mapData.set(uploadUuid, new LeafletMapData(leafletMap));
         return leafletMap;
     }
 }

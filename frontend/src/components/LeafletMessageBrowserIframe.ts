@@ -12,8 +12,6 @@ type LeafletBoxBounds = {
     top: number
     right: number
     bottom: number
-    seed: string
-    index: number
 }
 
 type VisibleScrollBounds = {
@@ -28,12 +26,35 @@ type MapSize = {
     mapHeight: number
 }
 
+type UploadUuid = string
+
+type Url = string
+
+type ReceivedMapData = {
+    left: number
+    top: number
+    right: number
+    bottom: number
+    seed: string
+    index: number
+    uploadUuid: UploadUuid
+    dataImageBaseUrl: Url
+}
+
 class MapData {
     public mapSize: MapSize;
     public leafletBoxBounds: LeafletBoxBounds;
-    constructor(mapSize: MapSize, leafletBoxBounds: LeafletBoxBounds) {
+    public seed: string;
+    public index: number;
+    public uploadUuid: UploadUuid;
+    public dataImageBaseUrl: Url;
+    constructor(mapSize: MapSize, leafletBoxBounds: LeafletBoxBounds, seed: string, index: number, uploadUuid: UploadUuid, dataImageBaseUrl: Url) {
         this.mapSize = mapSize;
         this.leafletBoxBounds = leafletBoxBounds;
+        this.seed = seed;
+        this.index = index;
+        this.uploadUuid = uploadUuid;
+        this.dataImageBaseUrl = dataImageBaseUrl;
     }
 }
 
@@ -46,11 +67,12 @@ interface LeafletBoxesMessage {
  * Syncs the Leaflet map position to the data from the iframe via postMessage.
  */
 export class LeafletMessageBrowserIframe {
-    private readonly DEBUG_PRINT_FORWARDED_INTERACTION_EVENTS = false;
+    private readonly DEBUG_DO_PRINT_FORWARDED_INTERACTION_EVENTS = false;
+    private readonly DEBUG_DO_PRINT_RECEIVED_LEAFLET_BOXES = false;
 
     private readonly iframe: HTMLIFrameElement;
     private readonly leafletWebGl2Map: LeafletWebGL2Map;
-    private readonly mapData: Map<string, MapData>;
+    private readonly mapData: Map<UploadUuid, MapData>;
     private readonly mapClippingWrapper: HTMLDivElement;
     private animationFrameId: number;
     private readonly controller: AbortController;
@@ -59,7 +81,7 @@ export class LeafletMessageBrowserIframe {
 
     constructor(iframe: HTMLIFrameElement, mapClippingWrapper: HTMLDivElement, leafletWebGl2Map: LeafletWebGL2Map) {
         this.iframe = iframe;
-        this.mapData = new Map<string, MapData>();
+        this.mapData = new Map<UploadUuid, MapData>();
         this.mapClippingWrapper = mapClippingWrapper;
         this.leafletWebGl2Map = leafletWebGl2Map;
         this.controller = new AbortController();
@@ -89,6 +111,7 @@ export class LeafletMessageBrowserIframe {
     }
 
     // Fake wheel event to the Leaflet map. Workaround for the iframe not receiving wheel events.
+    // Undefined behavior when there are overlapping maps.
     // TODO: possibly move the map code to the iframe to avoid this issue
     // TODO: if not, fake pointer events to the iframe too
     private handleIframeEvent(data: {
@@ -99,15 +122,15 @@ export class LeafletMessageBrowserIframe {
     }) {
         const { type, clientX, clientY } = data;
 
-        for (const [seed, mapData] of this.mapData.entries()) {
+        for (const [uploadUuid, mapData] of this.mapData.entries()) {
             const { left, top, right, bottom } = mapData.leafletBoxBounds;
 
             // TODO: this manual dispatch event calculating the Leaflet map position might not work on Retina displays, should be tested
             if (clientX >= left && clientX <= right && clientY >= top && clientY <= bottom) {
-                const mapDivId = this.getLeafletMapId(seed);
+                const mapDivId = this.getLeafletMapId(uploadUuid);
                 const mapDiv = document.getElementById(mapDivId);
                 if (!mapDiv) {
-                    console.warn(`Map DOM not found for seed ${seed}`);
+                    console.warn(`Map DOM not found for uploadUuid ${uploadUuid}`);
                     return;
                 }
 
@@ -144,8 +167,8 @@ export class LeafletMessageBrowserIframe {
                 }
 
                 mapDiv.dispatchEvent(event);
-                if (this.DEBUG_PRINT_FORWARDED_INTERACTION_EVENTS) {
-                    console.log(`Dispatched ${nativeType} to map ${seed}`);
+                if (this.DEBUG_DO_PRINT_FORWARDED_INTERACTION_EVENTS) {
+                    console.log(`Dispatched ${nativeType} to map ${uploadUuid}`);
                 }
 
                 // Fake a mouse event for pointer events
@@ -167,8 +190,8 @@ export class LeafletMessageBrowserIframe {
                     });
 
                     mapDiv.dispatchEvent(syntheticMouseDown);
-                    if (this.DEBUG_PRINT_FORWARDED_INTERACTION_EVENTS) {
-                        console.log(`Dispatched synthetic mouse event to map ${seed}`);
+                    if (this.DEBUG_DO_PRINT_FORWARDED_INTERACTION_EVENTS) {
+                        console.log(`Dispatched synthetic mouse event to map ${uploadUuid}`);
                     }
                 }
 
@@ -189,8 +212,8 @@ export class LeafletMessageBrowserIframe {
                     });
 
                     mapDiv.dispatchEvent(syntheticMouseOver);
-                    if (this.DEBUG_PRINT_FORWARDED_INTERACTION_EVENTS) {
-                        console.log(`Dispatched synthetic mouse event to map ${seed}`);
+                    if (this.DEBUG_DO_PRINT_FORWARDED_INTERACTION_EVENTS) {
+                        console.log(`Dispatched synthetic mouse event to map ${uploadUuid}`);
                     }
                 }
                 return;
@@ -201,6 +224,10 @@ export class LeafletMessageBrowserIframe {
     private parseLeafletBoxesData(event: MessageEvent<LeafletBoxesMessage>) {
         try {
             const boxes = JSON.parse(event.data.boxesJson);
+
+            if (this.DEBUG_DO_PRINT_RECEIVED_LEAFLET_BOXES) {
+                console.log("Received leaflet boxes data:", boxes);
+            }
 
             // TODO: remove this debug code
             const debugPredefinedSeeds = [
@@ -214,11 +241,35 @@ export class LeafletMessageBrowserIframe {
                 "M-BAD-C-687529253-0-0-0-missing-mass32",
                 "M-BAD-C-687529253-0-0-0-missing-temperature32"
             ]
-            const mapContainers: LeafletBoxBounds[] = boxes["map-containers"].map((box: LeafletBoxBounds) => ({
+            const mapContainers: ReceivedMapData[] = boxes["map-containers"].map((box: ReceivedMapData) => ({
                 ...box,
-                seed: debugPredefinedSeeds[box.index - 1] ?? null
+                seed: `${debugPredefinedSeeds[box.index - 1]}-debug-seed` ?? null,
+                uploadUuid: `${debugPredefinedSeeds[box.index - 1]}-debug-uuid` ?? null,
+                dataImageBaseUrl: debugPredefinedSeeds[box.index - 1] ?? null
             }));
-            // const mapContainers: LeafletBoxBounds[] = boxes["map-containers"];
+            // TODO: readd this code once debug seeds are no longer needed (when uploading has been implemented)
+            // const mapContainers: ReceivedMapData[] = boxes["map-containers"];
+
+            const receivedMapData = new Map<UploadUuid, MapData>();
+
+            for (const item of mapContainers) {
+                const { left, top, right, bottom, seed, index, uploadUuid, dataImageBaseUrl } = item;
+
+                const mapSize: MapSize = {
+                    mapWidth: right - left,
+                    mapHeight: bottom - top,
+                };
+
+                const leafletBoxBounds: LeafletBoxBounds = {
+                    left,
+                    top,
+                    right,
+                    bottom,
+                };
+
+                const mapData = new MapData(mapSize, leafletBoxBounds, seed, index, uploadUuid, dataImageBaseUrl);
+                receivedMapData.set(uploadUuid, mapData);
+            }
 
             const visibleScrollBounds: VisibleScrollBounds[] = boxes["visible-scroll-bounds"];
             this.visibleScrollBounds = visibleScrollBounds;
@@ -231,23 +282,24 @@ export class LeafletMessageBrowserIframe {
 
             const mapClippingWrapper = this.mapClippingWrapper;
             mapClippingWrapper.style.visibility = isVisible ? "visible" : "hidden";
-            const newSeeds = new Set<string>(mapContainers.map(m => m.seed));
-            const activeSeeds = new Set<string>(this.mapData.keys());
+            const newUuids = new Set<UploadUuid>(receivedMapData.keys());
+            const activeUuids = new Set<UploadUuid>(this.mapData.keys());
 
             // TODO: check if this is needed
-            if (!this.areSetsEqual(newSeeds, activeSeeds)) {
+            if (!this.areSetsEqual(newUuids, activeUuids)) {
                 // window.parent.postMessage({ type: "seed-change", seedList: mapContainers.map(m => m.seed) }, "*");
-                // lastSeeds = newSeeds;
-                this.changeMapDom(mapClippingWrapper, newSeeds, activeSeeds); // TODO: class to sync maps, with an action on add, change, and remove?
-                // activeSeeds = newSeeds;
+                // lastSeeds = newUuids;
+                this.changeMapDom(mapClippingWrapper, receivedMapData, this.mapData); // TODO: class to sync maps, with an action on add, change, and remove?
+                // activeUuids = newUuids;
             }
 
             const { left: visLeft, top: visTop, right: visRight, bottom: visBottom } = visibleScrollBounds[0]; // for now, assume there is only one visible scroll bounds
-            for (const mapContainer of mapContainers) {
-                const {left, top, right, bottom, seed, index} = mapContainer;
+            for (const [uploadUuid, receivedMapDatum] of receivedMapData) {
+                const {seed, index, uploadUuid, dataImageBaseUrl} = receivedMapDatum;
+                const { left, top, right, bottom } = receivedMapDatum.leafletBoxBounds;
 
-                const coordKey = seed; // TODO: remove testing code
-                const mapContainerId = this.getMapContainerId(coordKey);
+                const coordKey = uploadUuid; // TODO: remove testing code
+                const mapContainerId = this.getMapContainerId(uploadUuid);
                 const mapDiv = document.getElementById(mapContainerId);
                 if (!mapDiv) {
                     throw this.createError(`Missing map elements for ${mapContainerId}`);
@@ -276,7 +328,7 @@ export class LeafletMessageBrowserIframe {
                 const mapData = this.mapData;
                 const prev = mapData.get(coordKey);
                 if (prev === undefined) {
-                    mapData.set(coordKey, new MapData({mapWidth, mapHeight}, mapContainer));
+                    mapData.set(coordKey, receivedMapDatum);
                 }
                 const hasSizeChanged = !prev || prev.mapSize.mapWidth !== mapWidth || prev.mapSize.mapHeight !== mapHeight;
 
@@ -284,15 +336,14 @@ export class LeafletMessageBrowserIframe {
                 if (curr === undefined) {
                     throw this.createError(`Missing map data for ${coordKey}`);
                 }
-                curr.leafletBoxBounds = mapContainer;
+                curr.leafletBoxBounds = receivedMapDatum.leafletBoxBounds;
                 if (hasSizeChanged) {
                     curr.mapSize = {mapWidth, mapHeight};
-                    const leafletMapId = this.getLeafletMapId(coordKey);
-                    this.leafletWebGl2Map.resizeMap(leafletMapId);
+                    this.leafletWebGl2Map.resizeMap(curr.uploadUuid);
                 }
             }
             for (const seed of this.mapData.keys()) {
-                if (!newSeeds.has(seed)) {
+                if (!newUuids.has(seed)) {
                     this.mapData.delete(seed);
                 }
             }
@@ -301,17 +352,17 @@ export class LeafletMessageBrowserIframe {
         }
     }
 
-    private getMapContainerId(seed: string) {
-        return `map-container-${seed}`;
+    private getMapContainerId(uuid: string) {
+        return `map-container-${uuid}`;
     }
 
-    private getLeafletMapId(seed: string) {
-        return `map-${seed}`;
+    private getLeafletMapId(uuid: string) {
+        return `map-${uuid}`;
     }
 
-    private addMapDom(mapClippingWrapper: HTMLDivElement, seed: string) {
+    private addMapDom(mapClippingWrapper: HTMLDivElement, mapDatum: MapData) {
         const mapContainer = document.createElement("div");
-        mapContainer.id = this.getMapContainerId(seed);
+        mapContainer.id = this.getMapContainerId(mapDatum.uploadUuid);
         mapContainer.className = "map-container";
         mapClippingWrapper.appendChild(mapContainer);
         const mapWrapper = document.createElement("div");
@@ -319,10 +370,10 @@ export class LeafletMessageBrowserIframe {
         mapContainer.appendChild(mapWrapper);
         const mapHeader = document.createElement("div");
         mapHeader.className = "map-header";
-        mapHeader.innerText = `Map of ${seed}`;
+        mapHeader.innerText = `Map of ${mapDatum.seed}`;
         mapWrapper.appendChild(mapHeader);
         const leafletMap = document.createElement("div");
-        const leafletMapId = this.getLeafletMapId(seed);
+        const leafletMapId = this.getLeafletMapId(mapDatum.uploadUuid);
         leafletMap.id = leafletMapId;
         leafletMap.className = "leaflet-map";
         mapWrapper.appendChild(leafletMap);
@@ -331,29 +382,28 @@ export class LeafletMessageBrowserIframe {
         mapFooter.innerText = "⚠️ Experimental Feature ⚠️";
         mapWrapper.appendChild(mapFooter);
 
-        this.leafletWebGl2Map.initializeMap(leafletMapId, seed);
+        this.leafletWebGl2Map.initializeMap(leafletMapId, mapDatum.seed, mapDatum.uploadUuid, mapDatum.dataImageBaseUrl); // TODO
 
         // LeafletWebGL2Map.value.createInstance(seed, `map-${seed}`); // new API TODO: check if this is needed
     }
 
-    private removeMapDom(seed: string) {
-        const mapContainerId = this.getMapContainerId(seed);
+    private removeMapDom(mapDatum: MapData) {
+        const mapContainerId = this.getMapContainerId(mapDatum.uploadUuid);
         const mapContainer = document.getElementById(mapContainerId);
         if (!mapContainer) {
             console.error(`Map container with id ${mapContainerId} not found`);
             throw new Error(`Map container with id ${mapContainerId} not found`);
         }
         mapContainer.remove(); // TODO: check that this is enough to remove everything
-        const leafletMapId = this.getLeafletMapId(seed);
-        this.leafletWebGl2Map.removeMap(leafletMapId);
+        this.leafletWebGl2Map.removeMap(mapDatum.uploadUuid);
         // LeafletWebGL2Map.value.destroyInstance(seed); // TODO: check if this is needed
     }
 
-    private changeMapDom(mapClippingWrapper: HTMLDivElement, newSeeds: Set<string>, oldSeeds: Set<string>) {
+    private changeMapDom(mapClippingWrapper: HTMLDivElement, newMapData: Map<string, MapData>, oldMapData: Map<string, MapData>) {
         // add new maps
-        for (const s of newSeeds) if (!oldSeeds.has(s)) this.addMapDom(mapClippingWrapper, s);
+        for (const [uploadUuid, mapDatum] of newMapData) if (!oldMapData.has(uploadUuid)) this.addMapDom(mapClippingWrapper, mapDatum);
         // remove old maps
-        for (const s of oldSeeds) if (!newSeeds.has(s)) this.removeMapDom(s);
+        for (const [uploadUuid, mapDatum] of oldMapData) if (!newMapData.has(uploadUuid)) this.removeMapDom(mapDatum);
     }
 
     private areSetsEqual = (setA: Set<string>, setB: Set<string>) => {
