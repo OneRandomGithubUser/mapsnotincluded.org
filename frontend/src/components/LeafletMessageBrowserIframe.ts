@@ -76,13 +76,6 @@ export class LeafletMessageBrowserIframe {
             { signal: this.controller.signal }
         )
         window.addEventListener("message", (event: MessageEvent<any>) => {
-            /*
-            if (event.data?.type === "iframeWheel") {
-                console.log("event", event);
-                this.handleIframeWheel(event.data);
-            }
-
-             */
             if (typeof event.data?.type === "string" && event.data.type.startsWith("iframe:")) {
                 this.handleIframeEvent(event.data);
             }
@@ -95,6 +88,9 @@ export class LeafletMessageBrowserIframe {
         this.controller.abort();
     }
 
+    // Fake wheel event to the Leaflet map. Workaround for the iframe not receiving wheel events.
+    // TODO: possibly move the map code to the iframe to avoid this issue
+    // TODO: if not, fake pointer events to the iframe too
     private handleIframeEvent(data: {
         type: string;
         clientX: number;
@@ -105,6 +101,8 @@ export class LeafletMessageBrowserIframe {
 
         for (const [seed, mapData] of this.mapData.entries()) {
             const { left, top, right, bottom } = mapData.leafletBoxBounds;
+
+            // TODO: this manual dispatch event calculating the Leaflet map position might not work on Retina displays, should be tested
             if (clientX >= left && clientX <= right && clientY >= top && clientY <= bottom) {
                 const mapDivId = this.getLeafletMapId(seed);
                 const mapDiv = document.getElementById(mapDivId);
@@ -199,61 +197,6 @@ export class LeafletMessageBrowserIframe {
             }
         }
     }
-
-    // Fake wheel event to the Leaflet map. Workaround for the iframe not receiving wheel events.
-    // TODO: possibly move the map code to the iframe to avoid this issue
-    // TODO: if not, fake pointer events to the iframe too
-    /*
-    private handleIframeWheel(data: {
-        ctrlKey: boolean,
-        metaKey: boolean,
-        deltaY: number,
-        clientX: number,
-        clientY: number
-    }) {
-        const { clientX, clientY, deltaY, ctrlKey, metaKey } = data;
-
-        // NOTE: undefined behavior if there are overlapping maps
-        for (const [seed, mapData] of this.mapData.entries()) {
-            const {left, top, right, bottom, seed, index} = mapData.leafletBoxBounds;
-            if (
-                clientX >= left &&
-                clientX <= right &&
-                clientY >= top &&
-                clientY <= bottom
-            ) {
-                // Found the map under the cursor
-                const mapDivId = this.getLeafletMapId(seed);
-                const mapDiv = document.getElementById(mapDivId);
-                if (!mapDiv) {
-                    console.warn(`Map DOM not found for seed ${seed}`);
-                    return;
-                }
-
-                // Create a synthetic wheel event
-                const wheelEvent = new WheelEvent("wheel", {
-                    bubbles: true,
-                    cancelable: true,
-                    clientX,
-                    clientY,
-                    deltaY,
-                    ctrlKey,
-                    metaKey
-                });
-
-                // Dispatch the event to the Leaflet map's container
-                mapDiv.dispatchEvent(wheelEvent);
-                // TODO: this manual dispatch event might not work on Retina displays, should be tested
-                console.log(`Dispatched wheel event to map: ${seed}`);
-
-                // stopPropagation
-                stopPropagation(wheelEvent);
-                return; // Only dispatch to the first matching map
-            }
-        }
-    }
-    */
-
 
     private parseLeafletBoxesData(event: MessageEvent<LeafletBoxesMessage>) {
         try {
