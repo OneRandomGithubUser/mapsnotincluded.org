@@ -238,6 +238,9 @@ export class LeafletMessageBrowserIframe {
 
             // TODO: remove this debug code
             const debugPredefinedSeeds = [
+                "V-SFRZ-C-1999261489-0-0-0",
+                "V-LUSH-C-200910982-0-0-BN2",
+                "CER-C-693625094-0-0-0",
                 "SWMP-C-1827596172-0-0-0",
                 "M-BAD-C-687529253-0-0-0",
                 "V-OASIS-C-1888383654-0-0-F33",
@@ -252,7 +255,7 @@ export class LeafletMessageBrowserIframe {
                 ...box,
                 seed: `${debugPredefinedSeeds[box.index - 1]}-debug-seed` ?? null,
                 uploadUuid: `${debugPredefinedSeeds[box.index - 1]}-debug-uuid` ?? null,
-                dataImageBaseUrl: debugPredefinedSeeds[box.index - 1] ?? null
+                dataImageBaseUrl: `/world_data/${debugPredefinedSeeds[box.index - 1]}` ?? null
             }));
             // TODO: readd this code once debug seeds are no longer needed (when uploading has been implemented)
             // const mapContainers: ReceivedMapData[] = boxes["map-containers"];

@@ -1,6 +1,13 @@
 // Confused? See https://webgl2fundamentals.org/webgl/lessons/webgl-fundamentals.html.
 
-import {DataImageType, getDataImageType, getRenderLayer, RenderLayer} from "@/components/MapData";
+import {
+    DataImageType,
+    debugControlValuesAndColors,
+    defaultControlValuesAndColors,
+    getDataImageType,
+    getRenderLayer,
+    RenderLayer
+} from "@/components/MapData";
 import {createError} from "@/components/CreateCascadingError";
 import {loadBitmapsAsync, loadImagesAsync} from "@/components/LoadImage";
 
@@ -339,6 +346,7 @@ export default class WebGL2CanvasManager {
     private readonly EXPLICIT_UNINITIALIZED_COLOR: ReadonlyArray<number>;
     private readonly EXPLICIT_OUT_OF_BOUNDS_COLOR: ReadonlyArray<number>;
     private readonly WORLD_SLOTS_CAPACITY = 5;
+    private readonly CONTROL_VALUES_AND_COLORS_CAPACITY = 25;
     constructor(defaultWidth: number = 300, defaultHeight: number = 300) {
         // Get a WebGL context
         this.canvas = new OffscreenCanvas(defaultWidth, defaultHeight);
@@ -377,6 +385,10 @@ export default class WebGL2CanvasManager {
 
         this.EXPLICIT_UNINITIALIZED_COLOR = [0.0, 1.0, 1.0, 0.5]; // translucent cyan
         this.EXPLICIT_OUT_OF_BOUNDS_COLOR = [1.0, 0.0, 1.0, 0.5]; // translucent magenta
+
+        if (this.CONTROL_VALUES_AND_COLORS_CAPACITY * 4 > gl.MAX_FRAGMENT_UNIFORM_VECTORS) {
+            throw this.createError(`Too many control values and colors. ${this.CONTROL_VALUES_AND_COLORS_CAPACITY * 4} > ${gl.MAX_FRAGMENT_UNIFORM_VECTORS} (WebGL2 limit)`);
+        }
 
         // Initialize the world data texture array
         {
@@ -568,67 +580,26 @@ export default class WebGL2CanvasManager {
             case RenderLayer.MASS_OVERLAY:
                 layer = 3;
                 break;
+            case RenderLayer.RADIATION_OVERLAY:
+                layer = 4;
+                break;
             default:
                 throw this.createError(`Invalid render layer: ${renderLayer}`);
         }
         this.bind1UniformIntsToUnit(layer!, "u_render_layer");
 
-        const massControlValues: ReadonlyArray<[number]> = [
-            // [0], // Vacuum
-            [0.000001], // Near vacuum
-            [0.05], // Barely breathable
-            [0.525], // Breathable
-            [1.0], // Very breathable
-            // [1.8], // Vent overpressure
-            [4.0], // Popped eardrums
-            // [20.0], // High pressure vent overpressure
-            [500.0], // Abyssalite mass
-            [1000.0], // Water mass
-            [1800.0], // Magma mass
-            [20_000.0], // Neutronium mass
-            [100_000.0] // Probably an infinite storage
-        ];
-        this.bind1UniformFloatVectorToUnit(massControlValues, "u_massControlValues");
-        const massControlColors: ReadonlyArray<[number, number, number]> = [
-            [1.0, 1.0, 1.0],      // white (0)
-            [206.0/255.0, 58.0/255.0, 58.0/255.0],      // unbreathable red
-            [176.0/255.0, 75.0/255.0, 176.0/255.0],      // barely breathable rose
-            [78.0/255.0, 79.0/255.0, 221.0/255.0],      // breathable blue
-            [108.0/255.0, 204.0/255.0, 229.0/255.0],      // very breathable cyan
-            [0.8, 0.0, 0.8],      // abyssalite purple
-            [0.0, 0.0, 1.0],      // water blue
-            [1.0, 1.0, 0.0],      // magma red
-            [0.0, 0.0, 0.0],      // neutronium black
-            [1.0, 0.0, 1.0],      // magenta
-        ];
-        this.bind3UniformFloatVectorToUnit(massControlColors, "u_massControlColors");
+        let controlValuesAndColors: readonly {controlValue: readonly [number], controlColor: readonly [number, number, number, number]}[];
+        const currDefaultControlValuesAndColors = defaultControlValuesAndColors.get(renderLayer);
+        if (currDefaultControlValuesAndColors === undefined) {
+            controlValuesAndColors = debugControlValuesAndColors;
+        } else {
+            controlValuesAndColors = currDefaultControlValuesAndColors;
+        }
 
-        const tempControlValues: ReadonlyArray<[number]> = [
-            [0.0], // Absolute zero
-            [-0.1 + 273.15], // Cold
-            [9.9 + 273.15], // Chilled
-            [19.9 + 273.15], // Temperate
-            [29.9 + 273.15], // Warm
-            [36.9 + 273.15], // Hot
-            [99.9 + 273.15], // Scorching
-            [1799.9 + 273.15], // Molten
-            [3421.85 + 273.15], // Abyssalite/tungsten melting
-            [9999.9] // Max temp
-        ];
-        this.bind1UniformFloatVectorToUnit(tempControlValues, "u_temperatureControlValues");
-        const tempControlColors: ReadonlyArray<[number, number, number]> = [
-            [128.0/255.0, 254.0/255.0, 240.0/255.0],
-            [50.0/255.0, 170.0/255.0, 209.0/255.0],
-            [41.0/255.0, 139.0/255.0, 209.0/255.0],
-            [62.0/255.0, 208.0/255.0, 73.0/255.0],
-            [197.0/255.0, 209.0/255.0, 18.0/255.0],
-            [209.0/255.0, 145.0/255.0, 45.0/255.0],
-            [206.0/255.0, 80.0/255.0, 78.0/255.0],
-            [206.0/255.0, 19.0/255.0, 18.0/255.0],
-            [255.0/255.0, 26.0/255.0, 115.0/255.0],
-            [255.0/255.0, 0.0/255.0, 255.0/255.0]
-        ];
-        this.bind3UniformFloatVectorToUnit(tempControlColors, "u_temperatureControlColors");
+        const {controlValues, controlColors} = WebGL2CanvasManager.splitControlValuesAndColors(controlValuesAndColors);
+        this.bind1UniformFloatVectorToUnit(controlValues, "u_controlValues");
+        this.bind4UniformFloatVectorToUnit(controlColors, "u_controlColors");
+        this.bind1UniformIntsToUnit(controlValuesAndColors.length, "u_numControlValuesAndColors");
 
         // --- Phase 1: draw full-screen background ---
         // TODO: make space background follow the Leaflet map, not individual Leaflet tiles
@@ -743,11 +714,9 @@ uniform bool u_rendering_background;
 uniform int u_world_slots[5]; // which slots to sample
 uniform int u_render_layer; // which layer to sample
 
-uniform float u_massControlValues[10];
-uniform vec3 u_massControlColors[10];
-
-uniform float u_temperatureControlValues[10];
-uniform vec3 u_temperatureControlColors[10];
+uniform float u_controlValues[25];
+uniform vec4 u_controlColors[25];
+uniform int u_numControlValuesAndColors;
 
 const vec4 EXPLICIT_UNINITIALIZED_COLOR = vec4(0.0, 1.0, 1.0, 0.5);
 const vec4 EXPLICIT_OUT_OF_BOUNDS_COLOR = vec4(1.0, 0.0, 1.0, 0.5);
@@ -794,92 +763,28 @@ vec3 interpolateColor(float value, float v1, vec3 c1, float v2, vec3 c2) {
     float t = clamp((value - v1) / (v2 - v1), 0.0, 1.0);
     return mix(c1, c2, t); // Linear interpolation TODO readd
 }
+vec4 interpolateColor(float value, float v1, vec4 c1, float v2, vec4 c2) {
+    float t = clamp((value - v1) / (v2 - v1), 0.0, 1.0);
+    return mix(c1, c2, t); // Linear interpolation TODO readd
+}
 
 // Converts a float into an RGBA color using control points
-vec4 mapFloatToRGBA(float value, int numPoints, float controlValues[10], vec3 controlColors[10]) {
+vec4 mapFloatToRGBA(float value, int numPoints, float controlValues[25], vec4 controlColors[25]) {
     // Find the nearest two control points for interpolation
     for (int i = 0; i < numPoints - 1; i++) {
         if (value >= controlValues[i] && value <= controlValues[i + 1]) {
-            vec3 color = interpolateColor(value, 
+            vec4 color = interpolateColor(value, 
                              controlValues[i], controlColors[i], 
                              controlValues[i + 1], controlColors[i + 1]);
-            return vec4(color, 1.0);
+            return color;
         }
     }
     // Default: If outside range, clamp to nearest endpoint
     if (value < controlValues[0]) {
-        return vec4(controlColors[0], 1.0);
+        return controlColors[0];
     } else {
-        return vec4(controlColors[numPoints - 1], 1.0);
+        return controlColors[numPoints - 1];
     }
-}
-
-vec4 temperatureFloatToRGBA(float temperature) {
-    // Define control points (float value → RGB color)
-    const int tempPoints = 10;
-    /*
-    float tempControlValues[10] = float[](
-        0.0, // Absolute zero
-        -0.1 + 273.15, // Cold
-        9.9 + 273.15, // Chilled
-        19.9 + 273.15, // Temperate
-        29.9 + 273.15, // Warm
-        36.9 + 273.15, // Hot
-        99.9 + 273.15, // Scorching
-        1799.9 + 273.15, // Molten
-        3421.85 + 273.15, // Abyssalite/tungsten melting
-        9999.9 // Max temp
-    );
-    vec3 tempControlColors[10] = vec3[](
-        vec3(128.0/255.0, 254.0/255.0, 240.0/255.0),
-        vec3(50.0/255.0, 170.0/255.0, 209.0/255.0),
-        vec3(41.0/255.0, 139.0/255.0, 209.0/255.0),
-        vec3(62.0/255.0, 208.0/255.0, 73.0/255.0),
-        vec3(197.0/255.0, 209.0/255.0, 18.0/255.0),
-        vec3(209.0/255.0, 145.0/255.0, 45.0/255.0),
-        vec3(206.0/255.0, 80.0/255.0, 78.0/255.0),
-        vec3(206.0/255.0, 19.0/255.0, 18.0/255.0),
-        vec3(255.0/255.0, 26.0/255.0, 115.0/255.0),
-        vec3(255.0/255.0, 0.0/255.0, 255.0/255.0)
-    );
-    */
-    vec4 temperatureColor = mapFloatToRGBA(temperature, 10, u_temperatureControlValues, u_temperatureControlColors);
-    return temperatureColor;
-}
-
-vec4 massFloatToRGBA(float mass) {
-    // Define control points (float value → RGB color)
-    const int massPoints = 10;
-    /*
-    float massControlValues[10] = float[](
-        0.0, // Vacuum
-        0.000001, // Near vacuum
-        0.05, // Barely breathable
-        0.525, // Breathable
-        // 1.0, // Very breathable
-        1.8, // Vent overpressure
-        4.0, // Popped eardrums
-        // 20.0, // High pressure vent overpressure
-        500.0, // Abyssalite mass
-        1000.0, // Water mass
-        1800.0, // Magma mass
-        20000.0 // Neutronium mass
-    );
-    vec3 massControlColors[10] = vec3[](
-        vec3(1.0, 1.0, 1.0),      // white (0)
-        vec3(0.8, 0.8, 0.8),      // light gray
-        vec3(0.6, 0.6, 0.6),      // medium gray
-        vec3(1.0, 1.0, 0.0),      // yellow
-        vec3(1.0, 0.5, 0.0),      // orange
-        vec3(1.0, 0.0, 0.0),      // red
-        vec3(0.8, 0.0, 0.8),      // purple
-        vec3(0.0, 0.0, 1.0),      // blue
-        vec3(0.0, 1.0, 0.0),      // green
-        vec3(0.0, 1.0, 0.0),      // padding
-    );
-    */
-    vec4 massColor = mapFloatToRGBA(mass, 10, u_massControlValues, u_massControlColors);
-    return massColor;
 }
 
 // TODO: see if this is built-in
@@ -1089,7 +994,7 @@ void main() {
                 ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
                 outColor = get_error_texture_color(cell_pos);
             } else {
-                outColor = temperatureFloatToRGBA(temperature);
+                outColor = mapFloatToRGBA(temperature, u_numControlValuesAndColors, u_controlValues, u_controlColors);
             }
             
             break;
@@ -1134,7 +1039,52 @@ void main() {
                 ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
                 outColor = get_error_texture_color(cell_pos);
             } else {
-                outColor = massFloatToRGBA(mass);
+                outColor = mapFloatToRGBA(mass, u_numControlValuesAndColors, u_controlValues, u_controlColors);
+            }
+            
+            break;
+        }
+        case 4: {
+            // radiation layer
+            float rads = -1.0; // default value that should never be used
+            
+            if (u_rendering_background) {
+                // Assume the background is vacuum
+                rads = 0.0;
+            } else {
+                int slot_idx = u_world_slots[0]; // u_world_slots[0] = radiation32
+                if (slot_idx < 0 || slot_idx >= worldDataDepth) {
+                    // Invalid slot index, use the error texture
+                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                    outColor = get_error_texture_color(cell_pos);
+                    break;
+                }
+                // Look up a color from the texture.
+                vec4 radsColorData = texture(u_world_data_image_array,
+                                 vec3(v_texCoord, float(slot_idx)));
+                if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
+                    outColor = radsColorData;
+                    break;
+                }
+                
+                // Decode the 32-bit RGBA value to a 32-bit float
+                if (is_close_enough(radsColorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
+                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                    outColor = get_error_texture_color(cell_pos);
+                    break;
+                } else if (is_close_enough(radsColorData, EXPLICIT_OUT_OF_BOUNDS_COLOR, 0.01)) {
+                    rads = 0.0; // Assume out of bounds has no rads
+                } else {
+                    rads = decodeRGBAtoFloat(radsColorData);
+                }
+            }
+            
+            if (rads < 0.0) {
+                // rads is out of bounds, so use the error texture
+                ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+                outColor = get_error_texture_color(cell_pos);
+            } else {
+                outColor = mapFloatToRGBA(rads, u_numControlValuesAndColors, u_controlValues, u_controlColors);
             }
             
             break;
@@ -1151,6 +1101,29 @@ void main() {
 }
 `;
         return fragmentShaderSource;
+    }
+
+    private static splitControlValuesAndColors(
+        data: ReadonlyArray<{
+            controlValue: readonly [number],
+            controlColor: readonly [number, number, number, number]
+        }>
+    ): {
+        controlValues: ReadonlyArray<readonly [number]>,
+        controlColors: ReadonlyArray<readonly [number, number, number, number]>
+    } {
+        const controlValues: (readonly [number])[] = [];
+        const controlColors: (readonly [number, number, number, number])[] = [];
+
+        for (const {controlValue, controlColor} of data) {
+            controlValues.push(controlValue);
+            controlColors.push(controlColor);
+        }
+
+        return {
+            controlValues,
+            controlColors
+        };
     }
 
     private async normalizeImageInputArray(input: any): Promise<(HTMLImageElement | HTMLCanvasElement | OffscreenCanvas | ImageBitmap)[]> {
@@ -1906,7 +1879,7 @@ void main() {
         gl.uniform4i(u_uniform_location, a, b, c, d);
     }
 
-    bind1UniformIntVectorToUnit(v: ReadonlyArray<[number]>, uniformLocation: string) : void {
+    bind1UniformIntVectorToUnit(v: ReadonlyArray<readonly [number]>, uniformLocation: string) : void {
         const gl = this.gl;
 
         const u_uniform_location = this.getUniformLocation(uniformLocation);
@@ -1914,7 +1887,7 @@ void main() {
         gl.uniform1iv(u_uniform_location, flatArray);
     }
 
-    bind2UniformIntVectorToUnit(v: ReadonlyArray<[number, number]>, uniformLocation: string) : void {
+    bind2UniformIntVectorToUnit(v: ReadonlyArray<readonly [number, number]>, uniformLocation: string) : void {
         const gl = this.gl;
 
         const u_uniform_location = this.getUniformLocation(uniformLocation);
@@ -1922,7 +1895,7 @@ void main() {
         gl.uniform2iv(u_uniform_location, flatArray);
     }
 
-    bind3UniformIntVectorToUnit(v: ReadonlyArray<[number, number, number]>, uniformLocation: string) : void {
+    bind3UniformIntVectorToUnit(v: ReadonlyArray<readonly [number, number, number]>, uniformLocation: string) : void {
         const gl = this.gl;
 
         const u_uniform_location = this.getUniformLocation(uniformLocation);
@@ -1930,7 +1903,7 @@ void main() {
         gl.uniform3iv(u_uniform_location, flatArray);
     }
 
-    bind4UniformIntVectorToUnit(v: ReadonlyArray<[number, number, number, number]>, uniformLocation: string) : void {
+    bind4UniformIntVectorToUnit(v: ReadonlyArray<readonly [number, number, number, number]>, uniformLocation: string) : void {
         const gl = this.gl;
 
         const u_uniform_location = this.getUniformLocation(uniformLocation);
@@ -1952,7 +1925,7 @@ void main() {
         gl.uniform2f(u_uniform_location, a, b);
     }
 
-    bind1UniformFloatVectorToUnit(v: ReadonlyArray<[number]>, uniformLocation: string) : void {
+    bind1UniformFloatVectorToUnit(v: ReadonlyArray<readonly [number]>, uniformLocation: string) : void {
         const gl = this.gl;
 
         const u_uniform_location = this.getUniformLocation(uniformLocation);
@@ -1960,7 +1933,7 @@ void main() {
         gl.uniform1fv(u_uniform_location, flatArray);
     }
 
-    bind2UniformFloatVectorToUnit(v: ReadonlyArray<[number, number]>, uniformLocation: string) : void {
+    bind2UniformFloatVectorToUnit(v: ReadonlyArray<readonly [number, number]>, uniformLocation: string) : void {
         const gl = this.gl;
 
         const u_uniform_location = this.getUniformLocation(uniformLocation);
@@ -1968,7 +1941,7 @@ void main() {
         gl.uniform2fv(u_uniform_location, flatArray);
     }
 
-    bind3UniformFloatVectorToUnit(v: ReadonlyArray<[number, number, number]>, uniformLocation: string) : void {
+    bind3UniformFloatVectorToUnit(v: ReadonlyArray<readonly [number, number, number]>, uniformLocation: string) : void {
         const gl = this.gl;
 
         const u_uniform_location = this.getUniformLocation(uniformLocation);
@@ -1976,7 +1949,7 @@ void main() {
         gl.uniform3fv(u_uniform_location, flatArray);
     }
 
-    bind4UniformFloatVectorToUnit(v: ReadonlyArray<[number, number, number, number]>, uniformLocation: string) : void {
+    bind4UniformFloatVectorToUnit(v: ReadonlyArray<readonly [number, number, number, number]>, uniformLocation: string) : void {
         const gl = this.gl;
 
         const u_uniform_location = this.getUniformLocation(uniformLocation);

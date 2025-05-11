@@ -1,5 +1,11 @@
 import WebGL2Proxy from "@/components/WebGL2WebWorkerProxy";
-import {RenderLayer} from "@/components/MapData";
+import {
+    DataImageType,
+    getDataImageSourceUrl,
+    getDataImageType,
+    getRenderLayer,
+    RenderLayer
+} from "@/components/MapData";
 import {loadAndPad, loadBitmapsAsync, loadImagesAsync} from "@/components/LoadImage";
 import {bitmapToBase64, canvasToBase64, imageToBase64} from "@/components/MediaToBase64";
 
@@ -442,70 +448,67 @@ export class LeafletWebGL2Map {
                 // return;
             }
 
+            const urlMap: Map<DataImageType, string> = new Map();
 
-            const base = `/world_data/${dataImageBaseUrl}`;
-            const urls: string[] = [];
-            // TODO: image versioning
-            switch (renderLayer) {
-                case RenderLayer.ELEMENT_BACKGROUND:
-                    urls.push(`${base}/elementIdx8.png`);
-                    break;
-                case RenderLayer.ELEMENT_OVERLAY:
-                    urls.push(`${base}/elementIdx8.png`);
-                    break;
-                case RenderLayer.TEMPERATURE_OVERLAY:
-                    urls.push(`${base}/temperature32.png`);
-                    break;
-                case RenderLayer.MASS_OVERLAY:
-                    urls.push(`${base}/mass32.png`);
-                    break;
-                default:
-                    throw this.createError(`Unknown render layer ${renderLayer} in setupLeafletMap()`);
-            }
-
-            let bitmaps: ImageBitmap[];
-            try {
-                // TODO: move this to LoadImage.ts
-                const {successes, failures} = await loadImagesAsync(urls);
-                const images = successes.map(success => success.image);
-                try {
-                    bitmaps = await Promise.all(images.map(img => createImageBitmap(img, {
-                        premultiplyAlpha: "none",
-                        colorSpaceConversion: "none"
-                    })));
-                } catch (err: unknown) {
-                    const msg = `Failed to create bitmaps from images for ${urls} in initializeWebGL()`;
-                    throw this.createError(msg, true, err);
+            getDataImageType(renderLayer).forEach((dataImageType) => {
+                const url = `${dataImageBaseUrl}/${getDataImageSourceUrl(dataImageType)}`;
+                if (url) {
+                    urlMap.set(dataImageType, url);
+                } else {
+                    const msg = `Failed to get data image source URL for ${dataImageType} in setupLeafletMap()`;
+                    throw this.createError(msg, true);
                 }
-                //bitmaps = await Promise.all(urls.map(u => loadAndPad(u, 1200, 500)));
+            });
+
+            // === Parallel image load + bitmap creation ===
+            let bitmapMap: Map<RenderLayer, ImageBitmap[]> = new Map();
+
+            try {
+                const { successes, failures } = await loadImagesAsync([...urlMap.values()]);
+
+                const bitmapPromises = successes.map(async ({ url, image }) => {
+                    const bitmap = await createImageBitmap(image, {
+                        premultiplyAlpha: "none",
+                        colorSpaceConversion: "none",
+                    });
+
+                    // Find corresponding DataImageType for this URL
+                    const entry = [...urlMap.entries()].find(([_, u]) => u === url);
+                    if (!entry) {
+                        throw this.createError(`Unknown URL ${url} not found in urlMap()`);
+                    }
+
+                    const [dataImageType] = entry;
+
+                    // For each render layer affected by this data image type
+                    const layers = getRenderLayer(dataImageType);
+                    for (const layer of layers) {
+                        if (!bitmapMap.has(layer)) {
+                            bitmapMap.set(layer, []);
+                        }
+                        bitmapMap.get(layer)!.push(bitmap);
+                    }
+                });
+
+                await Promise.all(bitmapPromises);
             } catch (err: unknown) {
-                const msg = `Failed to load/pad images for seed=${seed} in setupLeafletMap()`;
+                const msg = `Failed to load or process bitmaps for ${dataImageBaseUrl} in setupLeafletMap()`;
                 throw this.createError(msg, true, err);
             }
 
+            const currBitmaps = bitmapMap.get(renderLayer);
+            if (currBitmaps === undefined || currBitmaps.length === 0) {
+                const msg = `No bitmaps found for render layer ${RenderLayer[renderLayer]} in setupLeafletMap()`;
+                throw this.createError(msg, true);
+            }
+
             try {
-                let bitmapMap = new Map<RenderLayer, ImageBitmap[]>();
-                // TODO: make this less hacky and more flexible to noncontiguous layers, if necessary
-                // use a switch statement in case we need to add more layers in the future
-                switch (renderLayer) {
-                    case RenderLayer.ELEMENT_BACKGROUND:
-                        bitmapMap.set(RenderLayer.ELEMENT_BACKGROUND, bitmaps);
-                        break;
-                    case RenderLayer.ELEMENT_OVERLAY:
-                        bitmapMap.set(RenderLayer.ELEMENT_OVERLAY, bitmaps);
-                        break;
-                    case RenderLayer.TEMPERATURE_OVERLAY:
-                        bitmapMap.set(RenderLayer.TEMPERATURE_OVERLAY, bitmaps);
-                        break;
-                    case RenderLayer.MASS_OVERLAY:
-                        bitmapMap.set(RenderLayer.MASS_OVERLAY, bitmaps);
-                        break;
-                    default:
-                        throw this.createError(`Unknown render layer ${renderLayer} in setupLeafletMap()`);
-                }
-                await this.webGLCanvasRef.value!.sequence().setup({ dataImages: bitmapMap, uploadUuid }).exec();
+                await this.webGLCanvasRef.value!.sequence().setup({
+                    dataImages: bitmapMap,
+                    uploadUuid,
+                }).exec();
             } catch (err: unknown) {
-                const msg = `WebGL setup failed for seed=${seed} in setupLeafletMap()`;
+                const msg = `WebGL setup failed for uploadUuid=${uploadUuid} in setupLeafletMap()`;
                 throw this.createError(msg, true, err);
             }
 
@@ -524,8 +527,8 @@ export class LeafletWebGL2Map {
                 console.log(`  Setting up Leaflet map for seed=${seed} in setupLeafletMap()`);
             }
 
-            const numCellsWorldWidth = bitmaps[0].width;
-            const numCellsWorldHeight = bitmaps[0].height;
+            const numCellsWorldWidth = currBitmaps[0].width;
+            const numCellsWorldHeight = currBitmaps[0].height;
 
             leafletMapData.setNumCellsWorldWidth(numCellsWorldWidth);
             leafletMapData.setNumCellsWorldHeight(numCellsWorldHeight);
@@ -873,6 +876,11 @@ export class LeafletWebGL2Map {
             maxZoom: LEAFLET_MAP_MAX_ZOOM,
             opacity: 0.8
         }); // Mass
+        const radiationOverlayLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.RADIATION_OVERLAY, {
+            minZoom: LEAFLET_MAP_MIN_ZOOM,
+            maxZoom: LEAFLET_MAP_MAX_ZOOM,
+            opacity: 0.8
+        }); // Radiation
 
         // Set initial layer
         elementBackgroundLayer.addTo(leafletMap);
@@ -888,6 +896,10 @@ export class LeafletWebGL2Map {
             mass: { layer: massOverlayLayer, icon: "🧱", label: "Mass",
                 soundOnSelectUrl: "/layer_sounds/SG_HUD_techView_oxygen_v02.wav",
                 soundOnDeselectUrl: "/layer_sounds/SG_HUD_techView_off_long.wav" },
+            radiation: { layer: radiationOverlayLayer, icon: "☢️", label: "Radiation",
+                soundOnSelectUrl: "/layer_sounds/SG_HUD_techView_off_short (2).wav", // TODO: get the actual sound effect
+                soundOnDeselectUrl: "/layer_sounds/SG_HUD_techView_off_long.wav" },
+
         };
 
         const toggleControl = new LeafletLayerToggleControl({
