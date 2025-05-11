@@ -5,11 +5,10 @@ import {
     debugControlValuesAndColors,
     defaultControlValuesAndColors,
     getDataImageType,
-    getRenderLayer,
     RenderLayer
 } from "@/components/MapData";
 import {createError} from "@/components/CreateCascadingError";
-import {loadBitmapsAsync, loadImagesAsync} from "@/components/LoadImage";
+import {loadBitmapsAsync} from "@/components/LoadImage";
 
 function getCanvasImageSourceDims(
     source: TexImageSource
@@ -583,6 +582,9 @@ export default class WebGL2CanvasManager {
             case RenderLayer.RADIATION_OVERLAY:
                 layer = 4;
                 break;
+            case RenderLayer.DECOR_OVERLAY:
+                layer = 5;
+                break;
             default:
                 throw this.createError(`Invalid render layer: ${renderLayer}`);
         }
@@ -733,6 +735,24 @@ struct vec2pixels {
     vec2 pixels;
 };
 
+struct floatOrVec4 {
+    float value;
+    vec4 color;
+    bool value_is_valid;
+};
+
+struct intOrVec4 {
+    int value;
+    vec4 color;
+    bool value_is_valid;
+};
+
+struct uintOrVec4 {
+    uint value;
+    vec4 color;
+    bool value_is_valid;
+};
+
 vec4 texture_displacement_in_pixels(sampler2D tex, vec2 uv_texCoord, vec2pixels d_pixels_struct) {
     vec2 d_pixels = d_pixels_struct.pixels; // unpack the struct
     vec2 texCoordPerPixel = vec2(1) / vec2(textureSize(tex, 0));
@@ -743,7 +763,7 @@ vec4 texture_displacement_in_pixels(sampler2D tex, vec2 uv_texCoord, vec2pixels 
 }
 
 // Function to reconstruct 32-bit float from RGBA
-float decodeRGBAtoFloat(vec4 rgba) {
+floatOrVec4 decodeRGBAtoFloat(vec4 rgba, vec2 v_worldCellPositionFloat) {
     // Convert 8-bit components (0-255 range) to unsigned integer (0.0 - 1.0 scaled)
     uint r = uint(round(rgba.r * 255.0));
     uint g = uint(round(rgba.g * 255.0));
@@ -755,7 +775,7 @@ float decodeRGBAtoFloat(vec4 rgba) {
     uint floatBits = (a << 24) | (r << 16) | (g << 8) | b; // little-endian
 
     // Convert bit pattern to float
-    return uintBitsToFloat(floatBits);
+    return floatOrVec4(uintBitsToFloat(floatBits), vec4(0.0, 0.0, 0.0, 0.0), true); // return the value and a dummy color
 }
 
 // Interpolates between two colors based on a float value and control points
@@ -809,6 +829,88 @@ bool is_close_enough(vec4 color, vec4 target_color, float threshold) {
     return (color_diff.r < threshold && color_diff.g < threshold && color_diff.b < threshold && color_diff.a < threshold);
 }
 
+// Function to reconstruct 32-bit uint from RGBA
+uintOrVec4 decodeRGBAtoUint32(vec4 rgba, vec2 v_worldCellPositionFloat) {
+    uint r = uint(rgba.r * 255.0);
+    uint g = uint(rgba.g * 255.0);
+    uint b = uint(rgba.b * 255.0);
+    uint a = uint(rgba.a * 255.0);
+    uint constructed_uint = (a << 24) | (r << 16) | (g << 8) | b; // little-endian
+    return uintOrVec4(constructed_uint, vec4(0.0, 0.0, 0.0, 0.0), true); // return the value and a dummy color
+}
+
+// TODO: use R8 textures instead of RGBA8 to save space
+// Function to reconstruct 8-bit uint from RGBA
+uintOrVec4 decodeRGBAtoUint8(vec4 rgba, vec2 v_worldCellPositionFloat) {
+    // The color is a grayscale value, which we can just use the red channel for
+    uint r = uint(rgba.r * 255.0);
+    uint g = uint(rgba.g * 255.0);
+    uint b = uint(rgba.b * 255.0);
+    uint a = uint(rgba.a * 255.0);
+    if (a != 255u || r != g || g != b) {
+        // If the color is not grayscale, use the error texture
+        ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+        return uintOrVec4(0u, get_error_texture_color(cell_pos), false);
+    }
+    return uintOrVec4(r, vec4(0.0, 0.0, 0.0, 0.0), true); // return the value and a dummy color
+}
+
+uintOrVec4 get_uint8_or_vec4(int possible_slots[5], int possible_slots_idx, vec2 v_worldCellPositionFloat, vec2 v_texCoord, sampler2DArray tex, bool is_explicitly_rendering_background, uint background_value, uint invalid_value) {
+    int slot_idx = possible_slots[possible_slots_idx];
+    int texDepth = textureSize(tex, 0).z; // Get world texture depth
+    if (slot_idx < 0 || slot_idx >= texDepth) {
+        // Invalid slot index, use the error texture
+        ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+        return uintOrVec4(invalid_value, get_error_texture_color(cell_pos), false);
+    }
+    if (is_explicitly_rendering_background) {
+        // If rendering the background, return the background value
+        return uintOrVec4(background_value, vec4(0.0, 0.0, 0.0, 0.0), true);
+    }
+    vec4 colorData = texture(tex, vec3(v_texCoord, float(slot_idx)));
+    if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
+        return uintOrVec4(invalid_value, colorData, false);
+    }
+    
+    if (is_close_enough(colorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
+        // If the color is uninitialized, use the error texture
+        ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+        return uintOrVec4(invalid_value, get_error_texture_color(cell_pos), false);
+    } else if (is_close_enough(colorData, EXPLICIT_OUT_OF_BOUNDS_COLOR, 0.01)) {
+        return uintOrVec4(background_value, vec4(0.0, 0.0, 0.0, 0.0), true); // return the value and a dummy color
+    } else {
+        return decodeRGBAtoUint8(colorData, v_worldCellPositionFloat);
+    }
+}
+
+floatOrVec4 get_float_or_vec4(int possible_slots[5], int possible_slots_idx, vec2 v_worldCellPositionFloat, vec2 v_texCoord, sampler2DArray tex, bool is_explicitly_rendering_background, float background_value, float invalid_value) {
+    int slot_idx = possible_slots[possible_slots_idx];
+    int texDepth = textureSize(tex, 0).z; // Get world texture depth
+    if (slot_idx < 0 || slot_idx >= texDepth) {
+        // Invalid slot index, use the error texture
+        ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+        return floatOrVec4(invalid_value, get_error_texture_color(cell_pos), false);
+    }
+    if (is_explicitly_rendering_background) {
+        // If rendering the background, return the background value
+        return floatOrVec4(background_value, vec4(0.0, 0.0, 0.0, 0.0), true);
+    }
+    vec4 colorData = texture(tex, vec3(v_texCoord, float(slot_idx)));
+    if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
+        return floatOrVec4(invalid_value, colorData, false);
+    }
+    
+    if (is_close_enough(colorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
+        // If the color is uninitialized, use the error texture
+        ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
+        return floatOrVec4(invalid_value, get_error_texture_color(cell_pos), false);
+    } else if (is_close_enough(colorData, EXPLICIT_OUT_OF_BOUNDS_COLOR, 0.01)) {
+        return floatOrVec4(background_value, vec4(0.0, 0.0, 0.0, 0.0), true); // return the value and a dummy color
+    } else {
+        return decodeRGBAtoFloat(colorData, v_worldCellPositionFloat);
+    }
+}
+
 void main() {
     // TODO: half-pixel correction
     // vec4 downPixelColor = texture_displacement_in_pixels(_____, v_texCoord, vec2pixels(vec2(0, -1)));
@@ -832,37 +934,14 @@ void main() {
                 vec4 space_foreground = texture(u_space_image_array, vec3(v_texCoord, 1));
                 outColor = space_background + space_foreground;
             } else {
-                // Look up a color from the texture.
-                int slot_idx = u_world_slots[0]; // u_world_slots[0] = elementIdx8
-                if (slot_idx < 0 || slot_idx >= worldDataDepth) {
-                    // Invalid slot index, use the error texture
-                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                    outColor = get_error_texture_color(cell_pos);
-                    break;
-                }
-                vec4 elementIdxColorData = texture(u_world_data_image_array,
-                                 vec3(v_texCoord, float(slot_idx)));
-                if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
-                    outColor = elementIdxColorData;
-                    break;
-                }
-                
-                uint element_idx = 255u; // default value that should never be used
-                
-                if (is_close_enough(elementIdxColorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
+                uintOrVec4 elementIdxColorData = get_uint8_or_vec4(u_world_slots, 0, v_worldCellPositionFloat, v_texCoord, u_world_data_image_array, u_rendering_background, 176u, 255u);
+                if (elementIdxColorData.value_is_valid == false) {
                     // If the color is uninitialized, use the error texture
-                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                    outColor = get_error_texture_color(cell_pos);
+                    outColor = elementIdxColorData.color;
                     break;
-                } else if (is_close_enough(elementIdxColorData, EXPLICIT_OUT_OF_BOUNDS_COLOR, 0.01)) {
-                     // Assume the background is vacuum
-                    element_idx = 176u;
-                } else {
-                    // The color is a grayscale value representing the element index, which we can just use the red channel for
-                    // If the color is magenta (set in the padding), it means there is no element, so we set the index to 255 (vacuum)
-                    // NOTE: assumes grayscale
-                    element_idx = uint(elementIdxColorData.r * 255.0);
                 }
+                uint element_idx = elementIdxColorData.value;
+                
                 uint element_data_image_array_width = uint(textureSize(u_element_data_image_array, 0).z); // Get element data image resolution width
                 uint max_element_idx = element_data_image_array_width - 1u; // Get max defined element with element data image resolution width
                 
@@ -908,38 +987,13 @@ void main() {
         case 1: {
             // element overlay
             
-            uint element_idx = 255u; // default value that should never be used
-            int slot_idx = u_world_slots[0]; // u_world_slots[0] = elementIdx8
-            if (slot_idx < 0 || slot_idx >= worldDataDepth) {
-                // Invalid slot index, use the error texture
-                ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                outColor = get_error_texture_color(cell_pos);
-                break;
-            }
-            // Look up a color from the texture.
-            vec4 elementIdxColorData = texture(u_world_data_image_array,
-                             vec3(v_texCoord, float(slot_idx)));
-            if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
-                outColor = elementIdxColorData;
-                break;
-            }
-            
-            if (u_rendering_background) {
-                element_idx = 176u; // Assume the background is vacuum
-            } else if (is_close_enough(elementIdxColorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
+            uintOrVec4 elementIdxColorData = get_uint8_or_vec4(u_world_slots, 0, v_worldCellPositionFloat, v_texCoord, u_world_data_image_array, u_rendering_background, 176u, 255u);
+            if (elementIdxColorData.value_is_valid == false) {
                 // If the color is uninitialized, use the error texture
-                ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                outColor = get_error_texture_color(cell_pos);
+                outColor = elementIdxColorData.color;
                 break;
-            } else if (is_close_enough(elementIdxColorData, EXPLICIT_OUT_OF_BOUNDS_COLOR, 0.01)) {
-                // Assume the background is vacuum
-                element_idx = 176u;
-            } else {
-                // The color is a grayscale value representing the element index, which we can just use the red channel for
-                // If the color is magenta (set in the padding), it means there is no element, so we set the index to 255 (vacuum)
-                // NOTE: assumes grayscale
-                element_idx = uint(elementIdxColorData.r * 255.0);
             }
+            uint element_idx = elementIdxColorData.value;
             
             uint element_data_image_array_width = uint(textureSize(u_element_data_image_array, 0).z); // Get element data image resolution width
             uint max_element_idx = element_data_image_array_width - 1u; // Get max defined element with element data image resolution width
@@ -955,39 +1009,16 @@ void main() {
             break;
         }
         case 2: {
-            // temperature 
-            float temperature = -1.0; // default value that should never be used
+            // temperature
+            floatOrVec4 temperatureData = get_float_or_vec4(u_world_slots, 0, v_worldCellPositionFloat, v_texCoord, u_world_data_image_array, u_rendering_background, 0.0, -1.0);
             
-            if (u_rendering_background) {
-                // Assume the background is vacuum
-                temperature = 0.0;
-            } else {
-                int slot_idx = u_world_slots[0]; // u_world_slots[0] = temperature32
-                if (slot_idx < 0 || slot_idx >= worldDataDepth) {
-                    // Invalid slot index, use the error texture
-                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                    outColor = get_error_texture_color(cell_pos);
-                    break;
-                }
-                // Look up a color from the texture.
-                vec4 tempColorData = texture(u_world_data_image_array,
-                                 vec3(v_texCoord, float(slot_idx)));
-                if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
-                    outColor = tempColorData;
-                    break;
-                }
-                                 
-                // Decode the 32-bit RGBA value to a 32-bit float
-                if (is_close_enough(tempColorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
-                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                    outColor = get_error_texture_color(cell_pos);
-                    break;
-                } else if (is_close_enough(tempColorData, EXPLICIT_OUT_OF_BOUNDS_COLOR, 0.01)) {
-                    temperature = 0.0; // Assume out of bounds is vacuum
-                } else {
-                    temperature = decodeRGBAtoFloat(tempColorData);
-                }
+            if (temperatureData.value_is_valid == false) {
+                // Use the error texture
+                outColor = temperatureData.color;
+                break;
             }
+            
+            float temperature = temperatureData.value;
             
             if (temperature < 0.0 || temperature > 10000.0) {
                 // temperature is out of bounds, so use the error texture
@@ -1001,38 +1032,15 @@ void main() {
         }
         case 3: {
             // mass layer
-            float mass = -1.0; // default value that should never be used
+            floatOrVec4 massData = get_float_or_vec4(u_world_slots, 0, v_worldCellPositionFloat, v_texCoord, u_world_data_image_array, u_rendering_background, 0.0, -1.0);
             
-            if (u_rendering_background) {
-                // Assume the background is vacuum
-                mass = 0.0;
-            } else {
-                int slot_idx = u_world_slots[0]; // u_world_slots[0] = mass32
-                if (slot_idx < 0 || slot_idx >= worldDataDepth) {
-                    // Invalid slot index, use the error texture
-                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                    outColor = get_error_texture_color(cell_pos);
-                    break;
-                }
-                // Look up a color from the texture.
-                vec4 massColorData = texture(u_world_data_image_array,
-                                 vec3(v_texCoord, float(slot_idx)));
-                if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
-                    outColor = massColorData;
-                    break;
-                }
-                
-                // Decode the 32-bit RGBA value to a 32-bit float
-                if (is_close_enough(massColorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
-                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                    outColor = get_error_texture_color(cell_pos);
-                    break;
-                } else if (is_close_enough(massColorData, EXPLICIT_OUT_OF_BOUNDS_COLOR, 0.01)) {
-                    mass = 0.0; // Assume out of bounds is vacuum
-                } else {
-                    mass = decodeRGBAtoFloat(massColorData);
-                }
+            if (massData.value_is_valid == false) {
+                // Use the error texture
+                outColor = massData.color;
+                break;
             }
+            
+            float mass = massData.value;
             
             if (mass < 0.0) {
                 // mass is out of bounds, so use the error texture
@@ -1046,46 +1054,39 @@ void main() {
         }
         case 4: {
             // radiation layer
-            float rads = -1.0; // default value that should never be used
+            floatOrVec4 radiationData = get_float_or_vec4(u_world_slots, 0, v_worldCellPositionFloat, v_texCoord, u_world_data_image_array, u_rendering_background, 0.0, -1.0);
             
-            if (u_rendering_background) {
-                // Assume the background is vacuum
-                rads = 0.0;
-            } else {
-                int slot_idx = u_world_slots[0]; // u_world_slots[0] = radiation32
-                if (slot_idx < 0 || slot_idx >= worldDataDepth) {
-                    // Invalid slot index, use the error texture
-                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                    outColor = get_error_texture_color(cell_pos);
-                    break;
-                }
-                // Look up a color from the texture.
-                vec4 radsColorData = texture(u_world_data_image_array,
-                                 vec3(v_texCoord, float(slot_idx)));
-                if (DEBUG_DO_RENDER_RAW_DATA_IMAGE) {
-                    outColor = radsColorData;
-                    break;
-                }
-                
-                // Decode the 32-bit RGBA value to a 32-bit float
-                if (is_close_enough(radsColorData, EXPLICIT_UNINITIALIZED_COLOR, 0.01)) {
-                    ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
-                    outColor = get_error_texture_color(cell_pos);
-                    break;
-                } else if (is_close_enough(radsColorData, EXPLICIT_OUT_OF_BOUNDS_COLOR, 0.01)) {
-                    rads = 0.0; // Assume out of bounds has no rads
-                } else {
-                    rads = decodeRGBAtoFloat(radsColorData);
-                }
+            if (radiationData.value_is_valid == false) {
+                // Use the error texture
+                outColor = radiationData.color;
+                break;
             }
             
-            if (rads < 0.0) {
-                // rads is out of bounds, so use the error texture
+            float radiation = radiationData.value;
+            
+            if (radiation < 0.0) {
+                // radiation is out of bounds, so use the error texture
                 ivec2 cell_pos = ivec2(floor(v_worldCellPositionFloat));
                 outColor = get_error_texture_color(cell_pos);
             } else {
-                outColor = mapFloatToRGBA(rads, u_numControlValuesAndColors, u_controlValues, u_controlColors);
+                outColor = mapFloatToRGBA(radiation, u_numControlValuesAndColors, u_controlValues, u_controlColors);
             }
+            
+            break;
+        }
+        case 5: {
+            // decor layer
+            floatOrVec4 decorData = get_float_or_vec4(u_world_slots, 0, v_worldCellPositionFloat, v_texCoord, u_world_data_image_array, u_rendering_background, 0.0, -1000.0);
+            
+            if (decorData.value_is_valid == false) {
+                // Use the error texture
+                outColor = decorData.color;
+                break;
+            }
+            
+            float decor = decorData.value;
+            
+            outColor = mapFloatToRGBA(decor, u_numControlValuesAndColors, u_controlValues, u_controlColors);
             
             break;
         }

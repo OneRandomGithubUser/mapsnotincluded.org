@@ -4,6 +4,7 @@ export enum RenderLayer {
     TEMPERATURE_OVERLAY,
     MASS_OVERLAY,
     RADIATION_OVERLAY,
+    DECOR_OVERLAY,
     LIGHT_OVERLAY,
     VISIBILITY_OVERLAY,
     DISEASE_OVERLAY,
@@ -13,6 +14,7 @@ export enum DataImageType {
     TEMPERATURE,
     MASS,
     RADIATION,
+    DECOR,
     LIGHT_SOURCE,
     SUNLIGHT,
     VISIBILITY,
@@ -26,6 +28,7 @@ const dataImageSourceUrls: Map<DataImageType, string> = new Map([
     [DataImageType.TEMPERATURE, "temperature32.png"],
     [DataImageType.MASS, "mass32.png"],
     [DataImageType.RADIATION, "radiation32.png"],
+    [DataImageType.DECOR, "decor32.png"],
 ]);
 export const getDataImageSourceUrl = (dataImageType: DataImageType): string => {
     const url = dataImageSourceUrls.get(dataImageType);
@@ -99,6 +102,23 @@ export const defaultControlValuesAndColors: Map<RenderLayer, readonly {controlVa
             controlValue: [100_000.0], // Probably an infinite storage
             controlColor: [1.0, 0.0, 1.0, 1.0], // magenta
         }]],
+    [RenderLayer.RADIATION_OVERLAY, [{
+            controlValue: [0.0], // No radiation
+            controlColor: [0.0, 0.0, 0.0, 1.0], // black
+        }, {
+            controlValue: [1_000.0], // Significant hazard
+            controlColor: [0.0/255.0, 255.0/255.0, 0.0/255.0, 1.0], // Radioactive green (guess)
+        }]],
+    [RenderLayer.DECOR_OVERLAY, [{
+            controlValue: [-100.0], // Ugly
+            controlColor: [255.0/255.0, 0.0/255.0, 0.0/255.0, 1.0], // Negative red (guess)
+        }, {
+            controlValue: [0.0], // Neutral
+            controlColor: [0.0, 0.0, 0.0, 1.0], // Black (guess)
+        }, {
+            controlValue: [100.0], // Beautiful
+            controlColor: [0.0/255.0, 255.0/255.0, 0.0/255.0, 1.0], // Positive green (guess)
+        }]]
 ])
 
 export const debugControlValuesAndColors: readonly {controlValue: readonly [number], controlColor: readonly [number, number, number, number]}[] = [{
@@ -144,6 +164,7 @@ const connectedLayers: [RenderLayer, DataImageType][] = [
     [RenderLayer.TEMPERATURE_OVERLAY, DataImageType.TEMPERATURE],
     [RenderLayer.MASS_OVERLAY, DataImageType.MASS],
     [RenderLayer.RADIATION_OVERLAY, DataImageType.RADIATION],
+    [RenderLayer.DECOR_OVERLAY, DataImageType.DECOR],
     [RenderLayer.LIGHT_OVERLAY, DataImageType.LIGHT_SOURCE],
     [RenderLayer.LIGHT_OVERLAY, DataImageType.SUNLIGHT],
     [RenderLayer.VISIBILITY_OVERLAY, DataImageType.VISIBILITY],

@@ -881,6 +881,11 @@ export class LeafletWebGL2Map {
             maxZoom: LEAFLET_MAP_MAX_ZOOM,
             opacity: 0.8
         }); // Radiation
+        const decorOverlayLayer = (L.gridLayer as any).myCanvasLayer(RenderLayer.DECOR_OVERLAY, {
+            minZoom: LEAFLET_MAP_MIN_ZOOM,
+            maxZoom: LEAFLET_MAP_MAX_ZOOM,
+            opacity: 0.8
+        }); // Decor
 
         // Set initial layer
         elementBackgroundLayer.addTo(leafletMap);
@@ -898,6 +903,9 @@ export class LeafletWebGL2Map {
                 soundOnDeselectUrl: "/layer_sounds/SG_HUD_techView_off_long.wav" },
             radiation: { layer: radiationOverlayLayer, icon: "☢️", label: "Radiation",
                 soundOnSelectUrl: "/layer_sounds/SG_HUD_techView_off_short (2).wav", // TODO: get the actual sound effect
+                soundOnDeselectUrl: "/layer_sounds/SG_HUD_techView_off_long.wav" },
+            decor: { layer: decorOverlayLayer, icon: "🖼️", label: "Decor",
+                soundOnSelectUrl: "/layer_sounds/SG_HUD_techView_decor.wav",
                 soundOnDeselectUrl: "/layer_sounds/SG_HUD_techView_off_long.wav" },
 
         };
